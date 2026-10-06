@@ -56,7 +56,7 @@ jobs:
       # govulncheck ships no prebuilt binary, so the tool version is pinned (for
       # reproducible runs) and setup-go's build cache absorbs the compile.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   tidy:
     runs-on: ubuntu-latest
