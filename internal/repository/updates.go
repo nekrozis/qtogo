@@ -150,11 +150,13 @@ func (p packageElement) toPackage() (PackageUpdate, error) {
 		pkg.Version = v
 	}
 
+	// The wire element types are field-identical to the exported ones, so the
+	// statements below are conversions rather than copies.
 	for _, l := range p.Licenses {
-		pkg.Licenses = append(pkg.Licenses, License{File: l.File, Name: l.Name})
+		pkg.Licenses = append(pkg.Licenses, License(l))
 	}
 	for _, o := range p.Operations {
-		pkg.Operations = append(pkg.Operations, Operation{Name: o.Name, Arguments: o.Arguments})
+		pkg.Operations = append(pkg.Operations, Operation(o))
 	}
 	return pkg, nil
 }
