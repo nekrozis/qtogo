@@ -27,6 +27,7 @@ const (
 	nestedPage    = "https://example.invalid/online/qtsdkrepository/windows_x86/desktop/qt6_680/"
 	flatPage      = "https://example.invalid/online/qtsdkrepository/windows_x86/desktop/qt5_5152/"
 	malformedPage = "https://example.invalid/online/qtsdkrepository/malformed"
+	truncatedPage = "https://example.invalid/online/qtsdkrepository/malformed/truncated"
 )
 
 // want is one expected child, in the order the page lists it.
@@ -140,6 +141,7 @@ func TestParseIndexRejectsAListingForAnotherPath(t *testing.T) {
 func TestParseIndexToleratesBrokenMarkup(t *testing.T) {
 	tests := []struct {
 		name     string
+		page     string
 		fixture  []string
 		children []want
 	}{
@@ -149,6 +151,7 @@ func TestParseIndexToleratesBrokenMarkup(t *testing.T) {
 			// name something other than a child of this page, and a link whose
 			// text is cut off.
 			name:    "odd but readable",
+			page:    malformedPage,
 			fixture: []string{"repository", "malformed", "index.html"},
 			children: []want{
 				{"qt6_680_msvc2022_64", true},
@@ -162,6 +165,7 @@ func TestParseIndexToleratesBrokenMarkup(t *testing.T) {
 			// The page is cut off inside a start tag, so the last link never
 			// completes and is dropped.
 			name:    "truncated mid-tag",
+			page:    truncatedPage,
 			fixture: []string{"repository", "malformed", "truncated.html"},
 			children: []want{
 				{"whole.html", false},
@@ -171,7 +175,7 @@ func TestParseIndexToleratesBrokenMarkup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			entries, err := ParseIndex(malformedPage, readFixture(t, tt.fixture...))
+			entries, err := ParseIndex(tt.page, readFixture(t, tt.fixture...))
 			if err != nil {
 				t.Fatalf("ParseIndex = %v, want no error", err)
 			}
@@ -193,4 +197,39 @@ func TestParseIndexRejectsAnUnusablePageURL(t *testing.T) {
 	if _, err := ParseIndex("://not-a-url", []byte("Index of /x")); err == nil {
 		t.Error("ParseIndex = nil error, want a failure for an unparsable URL")
 	}
+}
+
+// FuzzParseIndex enforces that ParseIndex never panics on arbitrary input.
+//
+// The invariant it guards is a consequence of how the parser is built: attribute
+// is only ever called on the slice s[open:tagEnd], where tagEnd is the position
+// of a '>' that indexByteOutsideQuotes found while not inside any quoted value.
+// That means every opening quote inside the slice already has its closing quote,
+// so the IndexByte call inside attribute always succeeds.  The proof is
+// structural, but the fuzzer makes it executable and keeps it that way across
+// future edits.
+//
+// Run with: go test -fuzz FuzzParseIndex ./internal/repository/
+func FuzzParseIndex(f *testing.F) {
+	// Seed the corpus with the pages the unit tests already exercise so the
+	// fuzzer starts from valid shapes rather than from a blank slate.
+	for _, fixture := range [][]string{
+		{"repository", "qt6-arch-split", "index.html"},
+		{"repository", "qt6-nested", "index.html"},
+		{"repository", "qt5-flat", "index.html"},
+		{"repository", "malformed", "index.html"},
+		{"repository", "malformed", "truncated.html"},
+		{"repository", "not-found", "index.html"},
+	} {
+		body, err := os.ReadFile(fixturePath(fixture...))
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(body)
+	}
+
+	f.Fuzz(func(t *testing.T, body []byte) {
+		// Any input is acceptable; the only requirement is no panic.
+		ParseIndex("https://example.invalid/online/qtsdkrepository/fuzz/", body) //nolint:errcheck
+	})
 }
