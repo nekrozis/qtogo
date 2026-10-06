@@ -1,0 +1,15 @@
+<Updates>
+ <ApplicationName>{AnyApplication}</ApplicationName>
+ <ApplicationVersion>1.0.0</ApplicationVersion>
+ <Checksum>false</Checksum>
+ <PackageUpdate>
+  <Name>qt.qt5.5152.win64_msvc2019_64</Name>
+  <DisplayName>Qt 5.15.2 MSVC 2019 64-bit</DisplayName>
+  <Description/>
+  <Version>5.15.2-0-202011130601</Version>
+  <ReleaseDate>2020-11-13</ReleaseDate>
+  <DownloadableArchives/>
+  <UpdateFile CompressedSize="0" OS="Any" UncompressedSize="0"/>
+  <SHA1>3333333333333333333333333333333333333333</SHA1>
+ </PackageUpdate>
+</Updates>

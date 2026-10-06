@@ -1,0 +1,53 @@
+<Updates>
+ <ApplicationName>{AnyApplication}</ApplicationName>
+ <ApplicationVersion>1.0.0</ApplicationVersion>
+ <Checksum>true</Checksum>
+ <PackageUpdate>
+  <Name>qt.qt6.680.win64_msvc2022_64</Name>
+  <DisplayName>Qt 6.8.0 MSVC 2022 64-bit</DisplayName>
+  <Description>Qt 6.8.0 prebuilt components.&lt;br>&lt;br>Hand-written fixture, no real URL.</Description>
+  <Version>6.8.0-0-202410030750</Version>
+  <ReleaseDate>2024-10-03</ReleaseDate>
+  <Default>true</Default>
+  <SortingPriority>700</SortingPriority>
+  <Dependencies>qt.qt6.680.patcher, qt.qt6.680.addons</Dependencies>
+  <AutoDependOn>qt.qt6.680.patcher</AutoDependOn>
+  <Script>installscript.qs</Script>
+  <DownloadableArchives>qtbase.7z, qtsvg.7z, qtdeclarative.7z</DownloadableArchives>
+  <UpdateFile CompressedSize="27666190" OS="Any" UncompressedSize="208203936"/>
+  <SHA1>a5f32a66b1f20a74a3ee0838c6e27acc2c13f475</SHA1>
+  <Operations>
+   <Operation name="Extract">
+    <Argument>@TargetDir@/6.8.0/msvc2022_64</Argument>
+    <Argument>qtbase.7z</Argument>
+   </Operation>
+   <Operation name="Extract">
+    <Argument>@TargetDir@/6.8.0/msvc2022_64</Argument>
+    <Argument>qtsvg.7z</Argument>
+   </Operation>
+  </Operations>
+ </PackageUpdate>
+ <PackageUpdate>
+  <Name>qt.qt6.680.addons.qtcharts</Name>
+  <DisplayName>Qt Charts</DisplayName>
+  <Description/>
+  <Version>6.8.0-0-202410030750</Version>
+  <ReleaseDate>2024-10-03</ReleaseDate>
+  <Virtual>true</Virtual>
+  <ForcedInstallation>true</ForcedInstallation>
+  <SortingPriority/>
+  <Dependencies>qt.qt6.680.doc.qtcharts, qt.qt6.680.examples.qtcharts</Dependencies>
+  <UserInterfaces>readmecheckboxform.ui,launchqtcreatorcheckboxform.ui</UserInterfaces>
+  <Translations>fr.qm,de.qm</Translations>
+  <Replaces>qt.qt6.680.addons.qtcharts.legacy</Replaces>
+  <Licenses>
+   <License file="LICENSE.LGPL3" name="LGPL v3"/>
+   <License file="LICENSE.GPL3" name="GPL v3"/>
+  </Licenses>
+  <DownloadableArchives/>
+  <UpdateFile CompressedSize="0" OS="Any" UncompressedSize="0"/>
+  <SHA1>1111111111111111111111111111111111111111</SHA1>
+ </PackageUpdate>
+ <SHA1>2222222222222222222222222222222222222222</SHA1>
+ <MetadataName>2024-10-03-0758_meta.7z</MetadataName>
+</Updates>

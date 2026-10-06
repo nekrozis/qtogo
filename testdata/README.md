@@ -9,6 +9,9 @@ repository/   one directory per layout or failure mode the parsers handle
 upstream/     cases taken from another project, with attribution
 ```
 
+A `repository/*` directory holds either a directory-listing page (`index.html`)
+or repository metadata (`Updates.xml`).
+
 A case taken from another project belongs under `upstream/`, with its licence,
 source and a pinned version recorded in the repository's `THIRD-PARTY` file. Those
 cases exist to catch regressions on real-world data; the tests for the repository
