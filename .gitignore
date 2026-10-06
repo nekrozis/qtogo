@@ -1,0 +1,22 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Coverage output
+coverage.out
+cover.html
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets and raw credentials — never commit
+*.secret
+.env

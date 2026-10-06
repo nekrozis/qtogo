@@ -1,0 +1,44 @@
+# Compatibility
+
+qtogo aims to be capability-compatible with the established Python tool that
+installs Qt SDKs, not byte-for-byte identical. This page describes the build as
+it is **today**; a difference is recorded when the feature it belongs to lands,
+not in advance.
+
+## Commands
+
+| Command | State |
+| --- | --- |
+| `qtogo help [topic]`, `-h`, `--help` | implemented; generated from the command tree |
+| `qtogo version`, `--version` | implemented; one line, exit 0 |
+| anything else, including `list-qt`, `install-qt` and the `*-official` verbs | absent: `unknown command "<word>"`, exit 2 |
+
+A verb that is not implemented is absent rather than a stub, so a typo and an
+unbuilt feature look the same on purpose: neither silently does nothing.
+
+## Output
+
+- stdout carries payloads; stderr carries diagnostics.
+- `--json` writes machine-readable documents and is honoured even when the
+  command line itself failed to parse, so a script always receives a document.
+- Text output is for people: `Error: …` followed by `hint: …` when there is a
+  suggestion.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | success |
+| 1 | internal error (unclassified) |
+| 2 | command-line usage error |
+| 3 | version or package not found |
+| 4 | network or mirror error |
+| 5 | integrity or security error |
+| 6 | extraction or filesystem error |
+| 7 | relocation error |
+| 8 | configuration error |
+| 9 | authentication error |
+| 130 | interrupted |
+
+"Not found" (3) and "network" (4) are deliberately separate: a script has to be
+able to tell a mistyped version from an unreachable server.
