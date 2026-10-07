@@ -26,8 +26,8 @@ func target(root, name string) (string, error) {
 
 	segments := splitName(name)
 	for _, segment := range segments {
-		if err := checkSegment(segment); err != nil {
-			return "", err
+		if why := badSegment(segment); why != "" {
+			return "", fmt.Errorf("the name has %s", why)
 		}
 	}
 
@@ -39,13 +39,19 @@ func target(root, name string) (string, error) {
 	return full, nil
 }
 
-// checkLink reports whether a symlink at path, inside root, may point at target.
+// checkLink refuses a symlink target that is not a plain relative path.
 //
-// The target is only ever followed, never created, so the question is not what it
-// looks like but where it ends up: resolved segment by segment from the link's own
-// directory, it has to stay inside the root. Both separators count, as they do in
-// a name.
-func checkLink(root, path, target string) error {
+// A target answers to the rule a name answers to: no absolute prefix, no drive, and
+// no segment that is empty, "." or "..". Resolving the target and refusing it only
+// where it lands -- the weaker rule -- accepts two spellings for one location
+// ("foo/../bar" and "bar"), which is how an entry collision is made, and it leaves
+// the rule as "wherever it ends up is safe" rather than "an entry is a legal
+// relative path". Refusing costs nothing here: in every Qt archive measured for the
+// record, each link target is a plain relative path.
+//
+// The target is never resolved, by this check or by the write that follows it: it
+// is stored in the link and left alone.
+func checkLink(target string) error {
 	if target == "" {
 		return errors.New("its target is empty")
 	}
@@ -55,28 +61,9 @@ func checkLink(root, path, target string) error {
 	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, `\`) || drivePrefix(target) {
 		return errors.New("its target is absolute")
 	}
-
-	dir, err := filepath.Rel(root, filepath.Dir(path))
-	if err != nil {
-		return errors.New("its directory is not under the destination")
-	}
-	depth := 0
-	for _, segment := range splitName(filepath.ToSlash(dir)) {
-		if segment != "" && segment != "." {
-			depth++
-		}
-	}
 	for _, segment := range splitName(target) {
-		switch segment {
-		case "", ".":
-			// Nothing to resolve.
-		case "..":
-			depth--
-		default:
-			depth++
-		}
-		if depth < 0 {
-			return errors.New("its target leaves the destination")
+		if why := badSegment(segment); why != "" {
+			return fmt.Errorf("its target has %s", why)
 		}
 	}
 	return nil
@@ -106,33 +93,34 @@ func splitName(name string) []string {
 	return append(segments, name[start:])
 }
 
-// checkSegment refuses a segment the destination must not be asked to hold.
+// badSegment says what is wrong with one segment of a path, or returns "" when the
+// segment is an ordinary name. A name and a symlink target answer to the same rule.
 //
 // The Windows rules apply on every platform. A name Windows would reinterpret is
 // suspect whatever the host is, and a rule that changed with the host would be one
 // more thing to get wrong -- the same archive is extracted on all three.
-func checkSegment(segment string) error {
+func badSegment(segment string) string {
 	switch segment {
 	case "":
-		return errors.New("the name has an empty segment")
+		return "an empty segment"
 	case ".", "..":
-		return fmt.Errorf("the name has a %q segment", segment)
+		return fmt.Sprintf("a %q segment", segment)
 	}
 	for _, r := range segment {
 		if r < ' ' {
-			return fmt.Errorf("the segment %q holds a control character", segment)
+			return fmt.Sprintf("%q, which holds a control character", segment)
 		}
 	}
 	if strings.ContainsAny(segment, `<>:"|?*`) {
-		return fmt.Errorf("the segment %q holds a character no filename may", segment)
+		return fmt.Sprintf("%q, which holds a character no filename may", segment)
 	}
 	if strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
-		return fmt.Errorf("the segment %q ends in a dot or a space", segment)
+		return fmt.Sprintf("%q, which ends in a dot or a space", segment)
 	}
 	if reservedName(segment) {
-		return fmt.Errorf("the segment %q is a Windows device name", segment)
+		return fmt.Sprintf("%q, which Windows reads as a device", segment)
 	}
-	return nil
+	return ""
 }
 
 // reservedName reports whether Windows would take the segment for a device rather

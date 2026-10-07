@@ -86,7 +86,7 @@ func All(ctx context.Context, a *sevenzip.Archive, dest string, limits Limits) (
 	if err != nil {
 		return Report{}, err
 	}
-	return write(ctx, a, root, items)
+	return write(ctx, a, items)
 }
 
 // check rejects a limit a caller left unset. A zero or negative bound would make
@@ -207,7 +207,7 @@ func scan(a *sevenzip.Archive, root string, limits Limits) ([]item, error) {
 // links last: created earlier, a link the archive made could be the path a later
 // entry is written through, and the destination is the one place nothing is
 // followed.
-func write(ctx context.Context, a *sevenzip.Archive, root string, items []item) (Report, error) {
+func write(ctx context.Context, a *sevenzip.Archive, items []item) (Report, error) {
 	var (
 		report Report
 		dirs   []item
@@ -244,7 +244,7 @@ func write(ctx context.Context, a *sevenzip.Archive, root string, items []item) 
 		if err := ctx.Err(); err != nil {
 			return Report{}, cancelled(err)
 		}
-		written, err := writeLink(a, it, root)
+		written, err := writeLink(a, it)
 		if err != nil {
 			return Report{}, err
 		}
@@ -300,9 +300,9 @@ func writeFile(a *sevenzip.Archive, it item) (uint64, error) {
 //
 // The target is the entry's content, so where the link points is only known once
 // it has been decoded -- which is why links are made in a pass of their own. A
-// target that leaves the destination is refused here, with the files already
+// target that is not a plain relative path is refused here, with the files already
 // written; the caller throws the destination away rather than repairing it.
-func writeLink(a *sevenzip.Archive, it item, root string) (uint64, error) {
+func writeLink(a *sevenzip.Archive, it item) (uint64, error) {
 	var target bytes.Buffer
 	counted := &countWriter{w: &target}
 	if err := a.WriteEntry(it.index, counted); err != nil {
@@ -311,7 +311,7 @@ func writeLink(a *sevenzip.Archive, it item, root string) (uint64, error) {
 	if counted.n != it.size {
 		return 0, undecodable(errors.New("the target is not the size the archive records"), "reading %s", it.name)
 	}
-	if err := checkLink(root, it.path, target.String()); err != nil {
+	if err := checkLink(target.String()); err != nil {
 		return 0, unsafeEntry(it.name, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(it.path), 0o750); err != nil {

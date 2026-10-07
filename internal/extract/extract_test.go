@@ -261,8 +261,8 @@ func TestAllCreatesSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("All = %v", err)
 	}
-	if report.Links != 4 {
-		t.Errorf("Links = %d, want 4", report.Links)
+	if report.Links != 3 {
+		t.Errorf("Links = %d, want 3", report.Links)
 	}
 
 	if got, err := os.Readlink(filepath.Join(dir, "lib", "libfoo.so")); err != nil || got != "libfoo.so.1" {
@@ -273,9 +273,9 @@ func TestAllCreatesSymlinks(t *testing.T) {
 	if body, err := os.ReadFile(filepath.Join(dir, "lib", "libfoo.so")); err != nil || string(body) != "the real library\n" {
 		t.Errorf("reading through lib/libfoo.so = %q (%v)", body, err)
 	}
-	// A target that steps up but stays inside is kept exactly as written.
-	if got, err := os.Readlink(filepath.Join(dir, "sub", "up-link")); err != nil || got != "../top.txt" {
-		t.Errorf("sub/up-link -> %q (%v), want ../top.txt", got, err)
+	// A sibling link keeps the target the archive wrote, verbatim.
+	if got, err := os.Readlink(filepath.Join(dir, "sub", "inside-link")); err != nil || got != "inside.txt" {
+		t.Errorf("sub/inside-link -> %q (%v), want inside.txt", got, err)
 	}
 
 	// Modes come from the archive, not from the umask.
