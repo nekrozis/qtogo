@@ -15,9 +15,15 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -31,6 +37,7 @@ const usage = `usage: bootstrap <command> [arguments]
   build [-o <path>]   build the qtogo binary for this host
   test [-race]        run the unit tests
   check               gofmt check, go vet, the tests, golangci-lint
+  release             write a host archive and its checksum into dist/
 
 The commands set up the C toolchain cgo needs, so no shell setup is required.
 `
@@ -92,6 +99,8 @@ func run(ctx context.Context, args []string) error {
 		return runTest(ctx, args[1:])
 	case "check":
 		return runCheck(ctx, args[1:])
+	case "release":
+		return runRelease(ctx, args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return nil
@@ -119,10 +128,6 @@ func runBuild(ctx context.Context, args []string) error {
 		return usageError("build takes -o <path> or nothing, not %d arguments", len(args))
 	}
 
-	env, err := buildEnv(false)
-	if err != nil {
-		return err
-	}
 	if dir := filepath.Dir(out); dir != "" {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return err
@@ -130,8 +135,158 @@ func runBuild(ctx context.Context, args []string) error {
 	}
 
 	version, commit, date := describedBuild(ctx)
+	return buildBinary(ctx, out, version, commit, date)
+}
+
+// buildBinary writes the qtogo binary to out, stamped with the build it came from.
+func buildBinary(ctx context.Context, out, version, commit, date string) error {
+	env, err := buildEnv(false)
+	if err != nil {
+		return err
+	}
 	return goRun(ctx, env, "build", "-trimpath", "-buildvcs=false",
 		"-ldflags", ldflags(version, commit, date), "-o", out, "./cmd/qtogo")
+}
+
+// distDir is where a release archive is written.
+const distDir = "dist"
+
+// runRelease writes an archive of this host's binary, with its licence, and a checksum
+// beside it.
+//
+// It is a manual step by design. Nothing publishes, and the version is whatever the
+// checkout says, because the parts that decide when a release happens and what it is
+// called are still open; this exists so that producing one by hand is the same on every
+// platform, not so that it happens on its own.
+func runRelease(ctx context.Context, args []string) error {
+	if len(args) > 0 {
+		return usageError("release takes no arguments")
+	}
+	version, commit, date := describedBuild(ctx)
+
+	// The binary is built somewhere private first, so that an archive only ever appears
+	// under its final name once it is complete.
+	staging, err := os.MkdirTemp("", "qtogo-release-")
+	if err != nil {
+		return err
+	}
+	// Best effort: a leftover temporary directory is not worth reporting over a build
+	// that already succeeded or failed on its own merits.
+	defer func() { _ = os.RemoveAll(staging) }()
+
+	binary := filepath.Join(staging, "qtogo"+exeSuffix())
+	if err := buildBinary(ctx, binary, version, commit, date); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(distDir, 0o750); err != nil {
+		return err
+	}
+	name := archiveName(version)
+	path := filepath.Join(distDir, name)
+	// The licence travels with the binary: this is BSD-3-Clause, and redistributing the
+	// binary means carrying the notice and the disclaimer.
+	if err := writeArchive(path, []string{binary, "LICENSE", "THIRD-PARTY.md"}); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	sum, err := fileSHA256(path)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+".sha256", []byte(sum+"  "+name+"\n"), 0o600); err != nil {
+		return err
+	}
+	fmt.Printf("bootstrap: wrote %s and %s.sha256\n", path, path)
+	return nil
+}
+
+// archiveName is what a release archive is called: the tool, its version, and the
+// platform the binary was built for.
+func archiveName(version string) string {
+	extension := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		extension = ".zip"
+	}
+	return strings.Join([]string{"qtogo", version, runtime.GOOS, runtime.GOARCH}, "-") + extension
+}
+
+// writeArchive puts the named files into one archive at path, flat, in whichever format
+// the name asks for.
+func writeArchive(path string, files []string) error {
+	out, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if strings.HasSuffix(path, ".zip") {
+		err = writeZip(out, files)
+	} else {
+		err = writeTarGz(out, files)
+	}
+	// A close error means the last of the bytes never landed, so it counts whenever the
+	// writing itself went well.
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+func writeTarGz(out io.Writer, files []string) error {
+	compressed := gzip.NewWriter(out)
+	archive := tar.NewWriter(compressed)
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(file)
+		if err != nil {
+			return err
+		}
+		header := &tar.Header{
+			Name: filepath.Base(file),
+			Mode: int64(info.Mode().Perm()),
+			Size: int64(len(body)),
+		}
+		if err := archive.WriteHeader(header); err != nil {
+			return err
+		}
+		if _, err := archive.Write(body); err != nil {
+			return err
+		}
+	}
+	if err := archive.Close(); err != nil {
+		return err
+	}
+	return compressed.Close()
+}
+
+func writeZip(out io.Writer, files []string) error {
+	archive := zip.NewWriter(out)
+	for _, file := range files {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		entry, err := archive.Create(filepath.Base(file))
+		if err != nil {
+			return err
+		}
+		if _, err := entry.Write(body); err != nil {
+			return err
+		}
+	}
+	return archive.Close()
+}
+
+// fileSHA256 is the digest written beside an archive, so that whoever downloads it can
+// check what they got.
+func fileSHA256(path string) (string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func runTest(ctx context.Context, args []string) error {

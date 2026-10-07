@@ -1,9 +1,16 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"context"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -154,6 +161,94 @@ func TestRunAcceptsHelp(t *testing.T) {
 	if err := run(context.Background(), []string{"help"}); err != nil {
 		t.Errorf("run(help) = %v", err)
 	}
+}
+
+func TestArchiveNameNamesThePlatform(t *testing.T) {
+	extension := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		extension = ".zip"
+	}
+	want := "qtogo-1.2.3-" + runtime.GOOS + "-" + runtime.GOARCH + extension
+	if got := archiveName("1.2.3"); got != want {
+		t.Errorf("archiveName = %q, want %q", got, want)
+	}
+}
+
+// A release archive holds the files under their own names, whatever directory they came
+// from, and the checksum beside it is a sha256 of the bytes on disk.
+func TestWriteArchiveAndChecksum(t *testing.T) {
+	dir := t.TempDir()
+	var sources []string
+	for _, name := range []string{"qtogo", "LICENSE"} {
+		path := filepath.Join(dir, "src", name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(name+" contents"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, path)
+	}
+
+	path := filepath.Join(dir, archiveName("1.2.3"))
+	if err := writeArchive(path, sources); err != nil {
+		t.Fatalf("writeArchive = %v", err)
+	}
+	if got, want := strings.Join(archiveEntries(t, path), " "), "LICENSE qtogo"; got != want {
+		t.Errorf("archive holds %q, want %q", got, want)
+	}
+
+	sum, err := fileSHA256(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sum) != 64 {
+		t.Errorf("checksum = %q, want a sha256 in hex", sum)
+	}
+}
+
+// archiveEntries lists an archive's contents, in whichever format its name asks for.
+func archiveEntries(t *testing.T, path string) []string {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	var names []string
+	if strings.HasSuffix(path, ".zip") {
+		info, err := file.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		archive, err := zip.NewReader(file, info.Size())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range archive.File {
+			names = append(names, entry.Name)
+		}
+	} else {
+		compressed, err := gzip.NewReader(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer compressed.Close()
+		archive := tar.NewReader(compressed)
+		for {
+			header, err := archive.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, header.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func hasEnv(env []string, entry string) bool {
