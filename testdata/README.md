@@ -36,8 +36,8 @@ written for the purpose:
   are `\`: `sub\nested\f.txt`, and a `..\escape.txt` that tries to leave the
   destination.
 - `symlink.7z` — built on Linux, so it carries Unix attributes: `lib/` holds a
-  library chained by symlink (`libfoo.so` → `libfoo.so.1` → the real file), and
-  `sub/up-link` points at `../top.txt`, a target that steps up but stays inside.
+  library chained by symlink (`libfoo.so` → `libfoo.so.1` → the real file) and
+  `sub/inside-link` points at its sibling. Every target is a plain relative path.
   It also pins the modes — a 0755 directory and 0644 files — which only the
   attribute word can carry.
 - `symlink-escape.7z` — the same shape with one link whose target leaves the
