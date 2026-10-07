@@ -60,8 +60,8 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 	if err != nil {
 		return VersionDirectory{}, fmt.Errorf("%q: %w", name, err)
 	}
-	if err := checkMinor(major, minor); err != nil {
-		return VersionDirectory{}, fmt.Errorf("%q: %w", name, err)
+	if err := checkMinor(name, major, minor); err != nil {
+		return VersionDirectory{}, err
 	}
 
 	return VersionDirectory{
@@ -90,9 +90,9 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 // The name is checked by decoding it: encoding fails when the produced name does
 // not read back as the input. That rejects what the spelling cannot carry — a
 // two-digit major, or a one-digit minor with a two-digit patch like 6.8.12, whose
-// digits would decode as 6.81.2. A suffix other than "-preview" fails the same
-// check, because a directory names no build stamp; a version from Updates.xml
-// carries one, so it is not what this function takes.
+// digits name a directory the corpus does not cover. A suffix other than
+// "-preview" fails the same check, because a directory names no build stamp; a
+// version from Updates.xml carries one, so it is not what this function takes.
 //
 // The extension is not validated beyond that check, as decision 3 of ADR-004
 // leaves its content to the caller.
@@ -126,17 +126,29 @@ func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
 	// are read by the preview rule. What does parse must read back as the input.
 	back, err := ParseVersionDirectory(name)
 	if err != nil {
-		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which is not a version directory: %w",
-			v.Major, v.Minor, v.Patch, v.Suffix, extension, name, err)
+		// The wrapped error names the directory it could not read, so this only has
+		// to say which version failed to spell.
+		return "", fmt.Errorf("%s has no directory spelling: %w", describe(v, extension), err)
 	}
+	// Raw is not compared: it is the spelling the caller happened to arrive with, and
+	// the encoder's own output is what it is being checked against.
 	if back.Version.Major != v.Major || back.Version.Minor != v.Minor ||
 		back.Version.Patch != v.Patch || back.Version.Suffix != v.Suffix ||
 		back.Extension != extension {
-		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which reads back as %d.%d.%d%s with extension %q",
-			v.Major, v.Minor, v.Patch, v.Suffix, extension, name,
-			back.Version.Major, back.Version.Minor, back.Version.Patch, back.Version.Suffix, back.Extension)
+		return "", fmt.Errorf("%s would be spelled %q, which reads back as %s",
+			describe(v, extension), name, describe(back.Version, back.Extension))
 	}
 	return name, nil
+}
+
+// describe names a version the way a failure should: its numbers and suffix, and
+// its extension only when it has one.
+func describe(v model.Version, extension string) string {
+	described := fmt.Sprintf("%d.%d.%d%s", v.Major, v.Minor, v.Patch, v.Suffix)
+	if extension != "" {
+		described += fmt.Sprintf(" with extension %q", extension)
+	}
+	return described
 }
 
 // maxMinor is the highest minor the repository corpus spells for each major. It is
@@ -160,13 +172,13 @@ var maxMinor = map[int]int{
 
 // checkMinor refuses a version whose minor is beyond what the corpus spells for its
 // major. A patch is a plain count with no competing reading, so it is not bounded.
-func checkMinor(major, minor int) error {
+func checkMinor(name string, major, minor int) error {
 	bound, ok := maxMinor[major]
 	if !ok {
-		return fmt.Errorf("major %d is not one the repository corpus covers", major)
+		return fmt.Errorf("the name %q is for major %d, which the repository corpus does not cover", name, major)
 	}
 	if minor > bound {
-		return fmt.Errorf("minor %d is above the %d the corpus spells for Qt %d", minor, bound, major)
+		return fmt.Errorf("the name %q spells minor %d, above the %d the corpus shows for Qt %d", name, minor, bound, major)
 	}
 	return nil
 }
