@@ -31,6 +31,14 @@ linters:
     rules:
       - path: _test\.go
         linters: [errcheck, gosec, unparam]
+      # gocritic analyses cgo files through the rewritten source cgo generates,
+      # then maps the position back: on the decoder glue it reports a
+      # dupSubExpr whose offset is past the end of the file. go-critic on its own
+      # reports nothing there, so the check is off for that one file rather than
+      # for cgo everywhere.
+      - path: internal/lzma/cgo\.go
+        linters: [gocritic]
+        text: dupSubExpr
 
 formatters:
   enable:
