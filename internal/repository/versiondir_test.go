@@ -118,8 +118,11 @@ func TestParseVersionDirectoryRejectsNamesThatDoNotFit(t *testing.T) {
 		{"qt_6110", "no major version digit"},
 		{"tools_qtcreator", "not a qt version directory"},
 		{"qt6_abcdef", "version is not numeric"},
+		{"qt6_dev", "the dev channel, which is not a version"},
+		{"qt6_dev_wasm_singlethread", "an archive of the dev channel"},
 		{"qt6_7_3_arm64_v8a", "an underscored version the repositories no longer use"},
-		{"qt6_6120_preview", "a preview written with a patch digit"},
+		{"qt6_6120_preview", "a preview token longer than three digits"},
+		{"qt6_6_preview", "a preview token of one digit"},
 		{"qt6_611" + strings.Repeat("9", 27), "a patch too large for an int"},
 	}
 
