@@ -13,11 +13,36 @@ cannot be invented. It carries names only, never a URL or a page.
 ```text
 repository/   one directory per layout or failure mode the parsers handle,
               plus the captured name list described above
+archive/      small 7z archives the extractor reads
 upstream/     cases taken from another project, with attribution
 ```
 
 A `repository/*` directory holds either a directory-listing page (`index.html`)
 or repository metadata (`Updates.xml`).
+
+The `archive/*` files are ours too, built with `7za a` (7-Zip 26.04) from files
+written for the purpose:
+
+- `plain.7z` — two files under `docs/`, non-solid, with the header stored
+  uncompressed (`-mhc=off -ms=off -m0=LZMA2`). The uncompressed header is
+  deliberate: it leaves the entry names in the file as plain UTF-16, so a test can
+  rewrite one in place — fixing the two header checksums that cover it — and so hand
+  a path check an archive that tries to escape the destination directory, rather
+  than a structure built by hand.
+- `solid.7z` — three files sharing one compressed stream (the default settings),
+  which is the shape Qt's own archives have.
+- `tree.7z` — a directory entry and an empty file, so both are covered.
+- `backslash.7z` — built like `plain.7z`, then rewritten in place so its separators
+  are `\`: `sub\nested\f.txt`, and a `..\escape.txt` that tries to leave the
+  destination.
+
+A 7z name normally separates its path segments with `/`, but the format also allows
+`\`. The archiver here only writes `/`, so a fixture that pins a backslash name
+down has to be built with the same in-place edit and checksum repair.
+
+Nothing under `archive/` is downloaded; the others regenerate with `7za a` and the
+switches above, and `backslash.7z` additionally needs the rename and checksum
+repair.
 
 A case taken from another project belongs under `upstream/`, with its licence,
 source and a pinned version recorded in the repository's `THIRD-PARTY` file. Those

@@ -1,0 +1,48 @@
+# Files taken unchanged from the LZMA SDK 26.04 (see VERSION and LICENSE).
+#
+# The set is what the SDK's own decoder builds -- C/Util/7z/makefile -- plus the two
+# CRC sources that makefile names from CPP/7zip/Crc.mak; both of those files are in
+# C/ too, as the transitive #include closure of the taken files confirms. Nothing
+# from outside C/ is here.
+#
+# The digest is what makes the set checkable offline: the test beside this file and
+# 'lzma-vendor verify' both read it, so a file that changed under us is caught with
+# no upstream copy to compare against.
+#
+# name  sha256
+7zAlloc.c  88f3d7249a436983eb8e146480ad5e0a4b26386b294e6213e7cb75c29644f35b
+7zArcIn.c  328a0e1c4515eaafd0cd4a517a64111d214121c71b7a7f1a27a3a6263164d83f
+7zBuf.c  34f1bbf82091c59663c2b14c0d6d3321d4bb189098f6e597e849d0a824a61e04
+7zCrc.c  d13ee23c3e66e0b7dbdaa91cdfa8a154145847421c1ab5ea131f536ab45e420b
+7zCrcOpt.c  1489340e2441a6b9828ed444832ec95bfaac730ca19654f7dabd01355e8b3efd
+7zDec.c  d5bf11ac446d3aa0b9fd84fbba040ca5e3cdbe18c5a6727339239417d06aed7a
+7zFile.c  e342050783a5bedc8cf19252a1463c33864113f712ec8f9f79808f89009bacb7
+7zStream.c  b387e633a5ec9ff80f4585b88f995a4f3ca1c9714a7457cf3eb28b56f33f27f3
+Bcj2.c  ab3cd1db08e40406676200150d37a5176f8bfc1f51ba78d43fbffb626b3d54f8
+Bra.c  d95436aa03d08bf898538b082ce0b036cf7a49390489fc5bdc3072637617b2ce
+Bra86.c  513bd33ab1efd5b51d699dfe9ec7dc9f6b09e885c2d5317eff3cdc7b54193295
+BraIA64.c  fea2763de6989761acb79cef3d3ba5a203be73a877ea6799b9adef5f39fcc6f4
+CpuArch.c  7bdfbc300d458950ba5008d152d6de1ce1bd40395a23619dd0c07f2c7947b56d
+Delta.c  c16f15ccad543c2ef7659641d69553de4e28ff3413db3d22417f6b36fac4b876
+Lzma2Dec.c  18c2fff9594dc9ab523087963f0a740ab5ffaea457746385c86771f32c8ef4a2
+LzmaDec.c  8a9d33dd01259a71b3c3cfbf645d06944bef65a152d307671372c332e9e0e022
+Ppmd7.c  07dcecf2616a8731c41bb219a44a13881b87aec34ef880226c5ebb668c17b3bd
+Ppmd7Dec.c  79190f3575984bed0f5ddc827ca2b99a25f6e5704c3946bad8556cb7f742b5d7
+7z.h  efbe9391f40ff82547e71e75bab0d3f9650391ee01b60dcefa13291c76bb2417
+7zAlloc.h  f0ae21e418dc87645fe37d4b70b707b2342f959ad864bf6b8700e3d71d25efbb
+7zBuf.h  88e9233f4acae553bb835e667b3aca271975eff8c6fb280e28cfd190500277bc
+7zCrc.h  39931db69404c46c018f5241845c02ab161f166de1dada882df87db5b3581b7f
+7zFile.h  14d27054e386fbb0abce843f2dc0f8173635e9514d00446cf169c125a8981fe5
+7zTypes.h  126c3ce886391042443fcc82764d26be7aacda2298588c6ec9bb7ce8c7b47732
+7zWindows.h  228be01470e87c8cee44ee2e6c1cc2a431ed26ec3a325edfbaa166b7ef4f492e
+Bcj2.h  02d4cec99b5f682edce072ee281e4f4b5b3f393df8ffca75e78e276aefc21982
+Bra.h  ee0ddc7215e6f2639909070face1102f734aa0386c211fa169b3d719e7fd8f0f
+Compiler.h  cfafaa89ba98a7f4f38cc589533fc03facb98ae1176dfe29d58217767ed5f149
+CpuArch.h  207f823fe5c7c0e3b13349f27f6e53946844da1dd4bcfa3abc72bd1357b833c5
+Delta.h  b09eae281931648ee79153516208093a454fe9c46e8d8ea7afd1cb72fd39873a
+Lzma2Dec.h  9f91dc1124b0767ceb77dd084259899bd4bcf88182dba906cdd182ab674fe31c
+LzmaDec.h  3a3b0ece1ba58601a8265a421a91b9720b39ee92ce898fadecb22f052bc3011f
+Ppmd.h  0356e2eb0258e3723bf49355d97e52a712a9abfdda60f177410a406353e056dd
+Ppmd7.h  dbb8572208a5670dd01be9121c3a65870ccc50d82b47dd959f5f811be7f0e459
+Precomp.h  88acadbc12902012872fa29337c86564bb8f9198d6be416aad6119bb537425d1
+RotateDefs.h  7592940d5dff6d0e0f2003fcd48040909819e2129d401d5aa56811b300b1624d
