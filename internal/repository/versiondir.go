@@ -74,6 +74,51 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 	}, nil
 }
 
+// EncodeVersionDirectory spells a version and an extension the way a repository
+// names a version directory, the inverse of ParseVersionDirectory.
+//
+// The token drops the zero patch only where the repositories drop it: for a
+// preview (whose marker lives in the extension) and for a release of major 5 with
+// a one-digit minor ("qt5_56", "qt5_59"). Everything else writes every digit
+// ("qt5_5100", "qt6_680"). The extension is taken verbatim; deriving an
+// architecture name is the caller's business, because the vocabulary changes
+// between releases.
+//
+// The name is checked by decoding it: encoding fails when the produced name does
+// not read back as the input. That rejects what the spelling cannot carry — a
+// two-digit major, or a one-digit minor with a two-digit patch like 6.8.12, whose
+// digits would decode as 6.81.2.
+func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
+	if v.Major > 9 {
+		return "", fmt.Errorf("version %v: a two-digit major has no directory spelling", v)
+	}
+
+	token := strconv.Itoa(v.Major) + strconv.Itoa(v.Minor)
+
+	// The zero patch is written except where the repositories drop it: for a
+	// preview, and for a 5.x release with a one-digit minor.
+	dropPatch := v.Suffix == "-preview" || (v.Major == 5 && v.Patch == 0 && v.Minor < 10)
+	if !dropPatch {
+		token += strconv.Itoa(v.Patch)
+	}
+
+	name := "qt" + strconv.Itoa(v.Major) + "_" + token
+	if extension != "" {
+		name += "_" + extension
+	}
+
+	back, err := ParseVersionDirectory(name)
+	if err != nil {
+		return "", fmt.Errorf("encoding %v would produce %q, which does not parse: %w", v, name, err)
+	}
+	if back.Version.Major != v.Major || back.Version.Minor != v.Minor || back.Version.Patch != v.Patch ||
+		back.Version.Suffix != v.Suffix || back.Extension != extension {
+		return "", fmt.Errorf("encoding %v with extension %q produces %q, which decodes as %v/%q",
+			v, extension, name, back.Version, back.Extension)
+	}
+	return name, nil
+}
+
 // splitVersion turns a directory's version digits into version components.
 //
 // A release spells the version in the fewest digits that fit: two digits are
