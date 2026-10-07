@@ -54,6 +54,35 @@ URL and no page, which is what keeps the tests offline.
   is a property of the naming scheme, not a list of released versions; ADR-004
   decision 5 carries the reasoning and the cost.
 
+## How the reference tool reads these names
+
+The reference implementation decodes a directory identifier positionally, and says so
+in its own comment (`aqt/metadata.py`, `get_semantic_version`) rather than citing a
+specification:
+
+> If the version is 3 digits, then major, minor, and patch each get 1 digit. If the
+> version is 4 or more digits, then major gets 1 digit, minor gets 2 digits and patch
+> gets all the rest. As of May 2021, the version strings at
+> https://download.qt.io/online/qtsdkrepository conform to this pattern; they are not
+> guaranteed to do so in the future.
+
+So it reads `qt6_6810` as 6.81.0: it never considers the other split, and it has no
+rule reserving or bounding a future minor. Its own tests record only names that have
+been observed (`51212` → 5.12.12, `600` → 6.0.0, `6_7_3` → 6.7.3). It also accepts the
+underscored `6_7_3` form, which this project refuses.
+
+What makes the ambiguity survivable there is where the name is read: that tool builds
+the directory it wants from the version it was given, and takes a package's version
+from the `Updates.xml` beside it (`<Version>6.11.0-0-202603180535</Version>` inside
+`qt6_6110`). Either way the name is an index and the metadata is canonical.
+
+That tool's version knowledge sits mostly in the layout rather than in the names:
+about thirty hard-coded thresholds across its source (`>= 6.8.0` for the extra
+nesting level, `>= 6.11.0` for the Windows architecture split,
+`ANDROID_SHARED_FOLDER_VER = 5.15.2`, and so on). Those measure the layout, not this
+corpus, and are noted only to keep the comparison honest: a new nesting level is a
+threshold for that tool and a probe for this one.
+
 ## Re-measuring
 
 - The mechanical half lives in the repository: append names to the corpus file and

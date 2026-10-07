@@ -22,8 +22,14 @@ type VersionDirectory struct {
 	Extension string
 }
 
-// ParseVersionDirectory reads a version directory name into the version and the
-// extension it encodes.
+// ParseVersionDirectory reads a repository directory identifier into the version and
+// the extension it carries.
+//
+// It is a best-effort reader of an identifier, not a lossless decoder of a version: a
+// directory name is an index, and what settles a version in this repository is the
+// <Version> in the Updates.xml beside the directory, not the directory's spelling.
+// Where a name can be read more than one way, the reading is refused rather than
+// chosen, so the result is a candidate a caller can act on -- see checkMinor.
 //
 // The name is "<qt><major>_<version>[_<extension>]", where <version> is the
 // version's digits without the dots: "qt6_6110" is 6.11.0 and "qt6_693" is 6.9.3.
@@ -78,7 +84,13 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 }
 
 // EncodeVersionDirectory spells a version and an extension the way a repository
-// names a version directory, the inverse of ParseVersionDirectory.
+// names a version directory.
+//
+// It is not ParseVersionDirectory read backwards and is not defined by it: this
+// generates the path a request is made from, by the rules below, and decoding its own
+// output is a check on those rules rather than the source of them. "What the encoder
+// writes decodes back to what it was given" is a property worth having, not the
+// specification.
 //
 // The token drops the zero patch only where the repositories drop it: for a
 // preview (whose marker lives in the extension) and for a release of major 5 with
@@ -165,6 +177,12 @@ func describe(v model.Version, extension string) string {
 // bound updated before its directory can be read. Without the bound, "qt6_6810"
 // would mean 6.81.0 today and 6.8.10 the day that release exists -- one name with
 // two meanings.
+//
+// The layout requires no such bound, so this is a maintained constant rather than a
+// magic number: the test beside this file asserts that it matches the corpus exactly,
+// so raising it needs a captured name to justify it, and capturing a name needs it
+// raised before the name can be read. docs/compatibility.md holds the procedure and
+// what it costs.
 var maxMinor = map[int]int{
 	5: 15,
 	6: 12,

@@ -181,6 +181,56 @@ func TestParseVersionDirectoryBoundsTheMinor(t *testing.T) {
 	}
 }
 
+// The bound is a snapshot of the corpus, so the two have to agree exactly: raising it
+// with no captured name to justify it fails here, and so does adding a name without
+// raising it. That is what keeps a maintained constant from becoming a number
+// somebody tuned. The split is done without the bound, so a name the bound would
+// refuse still counts as evidence.
+func TestMaxMinorMatchesTheCorpus(t *testing.T) {
+	body, err := os.ReadFile(fixturePath("repository", "version-directory-names.txt"))
+	if err != nil {
+		t.Fatalf("reading the name list: %v", err)
+	}
+
+	observed := map[int]int{}
+	for _, name := range strings.Split(string(body), "\n") {
+		name = strings.TrimSpace(name)
+		parts := strings.SplitN(name, "_", 3)
+		if name == "" || len(parts) < 2 || !isQtMajor(parts[0]) || !allDigits(parts[1]) {
+			continue // the dev channel, and anything else that is not a version
+		}
+		extension := ""
+		if len(parts) == 3 {
+			extension = parts[2]
+		}
+		major, minor, _, _, err := splitVersion(parts[1], strings.Contains(extension, "preview"))
+		if err != nil {
+			continue // a token the rules already refuse
+		}
+		if minor > observed[major] {
+			observed[major] = minor
+		}
+	}
+
+	if len(observed) == 0 {
+		t.Fatal("the corpus holds no version directories")
+	}
+	for major, minor := range observed {
+		bound, ok := maxMinor[major]
+		switch {
+		case !ok:
+			t.Errorf("the corpus spells major %d (up to minor %d), which maxMinor does not cover", major, minor)
+		case bound != minor:
+			t.Errorf("maxMinor[%d] = %d, but the corpus spells minor %d: move the bound with the corpus", major, bound, minor)
+		}
+	}
+	for major := range maxMinor {
+		if _, ok := observed[major]; !ok {
+			t.Errorf("maxMinor covers major %d, which the corpus does not spell", major)
+		}
+	}
+}
+
 func TestEncodeVersionDirectorySpellsTheName(t *testing.T) {
 	tests := []struct {
 		version model.Version
