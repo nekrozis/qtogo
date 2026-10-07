@@ -13,6 +13,11 @@ go.sum        text eol=lf
 .gitignore    text eol=lf
 .gitattributes text eol=lf
 
+# Shell scripts are read by sh on Linux and macOS and by Git Bash on Windows, and a
+# carriage return is part of the line to all of them: a CRLF script is a syntax error
+# rather than a formatting quirk. LF everywhere, like the Go sources.
+*.sh text eol=lf
+
 # Prose and data: normalize on commit, native line endings on checkout.
 *.md   text
 *.yml  text
