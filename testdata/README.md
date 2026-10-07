@@ -35,14 +35,23 @@ written for the purpose:
 - `backslash.7z` — built like `plain.7z`, then rewritten in place so its separators
   are `\`: `sub\nested\f.txt`, and a `..\escape.txt` that tries to leave the
   destination.
+- `symlink.7z` — built on Linux, so it carries Unix attributes: `lib/` holds a
+  library chained by symlink (`libfoo.so` → `libfoo.so.1` → the real file), and
+  `sub/up-link` points at `../top.txt`, a target that steps up but stays inside.
+  It also pins the modes — a 0755 directory and 0644 files — which only the
+  attribute word can carry.
+- `symlink-escape.7z` — the same shape with one link whose target leaves the
+  destination (`lib/evil` → `../../outside.txt`), which an extractor has to refuse.
 
 A 7z name normally separates its path segments with `/`, but the format also allows
 `\`. The archiver here only writes `/`, so a fixture that pins a backslash name
 down has to be built with the same in-place edit and checksum repair.
 
-Nothing under `archive/` is downloaded; the others regenerate with `7za a` and the
-switches above, and `backslash.7z` additionally needs the rename and checksum
-repair.
+Nothing under `archive/` is downloaded. The DOS-attribute archives regenerate with
+`7za a` and the switches above; `backslash.7z` additionally needs the rename and
+checksum repair. The two `symlink*` fixtures need a Unix archiver instead — the
+links and the Unix modes only exist there — and were built with `ln -s` and
+`7za a -snl` in a Linux container.
 
 A case taken from another project belongs under `upstream/`, with its licence,
 source and a pinned version recorded in the repository's `THIRD-PARTY` file. Those

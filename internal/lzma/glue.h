@@ -53,6 +53,13 @@ uint64_t qtogo_item_size(const qtogo_archive *a, uint32_t i);
 int qtogo_item_has_crc(const qtogo_archive *a, uint32_t i);
 uint32_t qtogo_item_crc(const qtogo_archive *a, uint32_t i);
 
+/* The attribute word the archive records for the item, and whether it records one.
+   It is passed through as the archive holds it: the low 16 bits are DOS
+   attributes and the high 16 are a Unix mode, present only when the extension bit
+   (0x8000) is set in the low half. What that means is the layer above's business. */
+int qtogo_item_has_attrib(const qtogo_archive *a, uint32_t i);
+uint32_t qtogo_item_attrib(const qtogo_archive *a, uint32_t i);
+
 /* The length of the item's name in UTF-16 units, terminator included. */
 size_t qtogo_item_name_len(const qtogo_archive *a, uint32_t i);
 void qtogo_item_name_copy(const qtogo_archive *a, uint32_t i, uint16_t *dest);

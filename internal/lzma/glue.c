@@ -197,6 +197,16 @@ uint32_t qtogo_item_crc(const qtogo_archive *a, uint32_t i)
   return (uint32_t)a->db.CRCs.Vals[i];
 }
 
+int qtogo_item_has_attrib(const qtogo_archive *a, uint32_t i)
+{
+  return SzBitWithVals_Check(&a->db.Attribs, i) ? 1 : 0;
+}
+
+uint32_t qtogo_item_attrib(const qtogo_archive *a, uint32_t i)
+{
+  return (uint32_t)a->db.Attribs.Vals[i];
+}
+
 size_t qtogo_item_name_len(const qtogo_archive *a, uint32_t i)
 {
   return SzArEx_GetFileNameUtf16(&a->db, i, NULL);

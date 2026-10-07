@@ -40,7 +40,10 @@ const (
 	CodeChecksumMismatch = "verify.checksum_mismatch"
 	CodeUnsafeArchive    = "archive.unsafe_entry"
 
-	CodeDiskFull = "extract.disk_full"
+	CodeDiskFull      = "extract.disk_full"
+	CodeExtractFailed = "extract.failed"
+	CodeExtractLimit  = "extract.limit_exceeded"
+	CodeExtractDecode = "extract.decode_failed"
 
 	CodeRelocateUnsupported = "relocate.unsupported_target"
 
