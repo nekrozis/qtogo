@@ -356,6 +356,39 @@ func TestBackslashNamesAreReportedVerbatim(t *testing.T) {
 	}
 }
 
+// A Windows-written archive records DOS attributes only. The Unix-extension bit is
+// what says the high half is a mode, so it must stay clear here: reading it anyway
+// would turn an archive attribute into a nonsense file type.
+func TestDosOnlyAttributesCarryNoUnixMode(t *testing.T) {
+	const (
+		dosArchive   = 0x20
+		dosDirectory = 0x10
+	)
+
+	a := openFixture(t, "tree.7z")
+
+	for i := 0; i < a.Len(); i++ {
+		entry, err := a.Entry(i)
+		if err != nil {
+			t.Fatalf("Entry(%d) = %v", i, err)
+		}
+		if !entry.HasAttribs {
+			t.Errorf("%s: no attributes recorded", entry.Name)
+			continue
+		}
+		if entry.Attribs&UnixExtension != 0 {
+			t.Errorf("%s: attributes %#x carry the Unix extension %#x, want DOS only",
+				entry.Name, entry.Attribs, uint32(UnixExtension))
+		}
+		if entry.IsDir && entry.Attribs&dosDirectory == 0 {
+			t.Errorf("%s: directory attributes %#x lack the directory bit", entry.Name, entry.Attribs)
+		}
+		if !entry.IsDir && entry.Attribs&dosArchive == 0 {
+			t.Errorf("%s: file attributes %#x lack the archive bit", entry.Name, entry.Attribs)
+		}
+	}
+}
+
 func TestEntryIndexIsBoundsChecked(t *testing.T) {
 	a := openFixture(t, "plain.7z")
 

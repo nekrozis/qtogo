@@ -68,6 +68,9 @@ func TestGlueNamesAndChecksums(t *testing.T) {
 	if _, ok := ItemCRC(h, 0); !ok {
 		t.Error("ItemCRC reports no checksum for an item the archive covers")
 	}
+	if _, ok := ItemAttribs(h, 0); !ok {
+		t.Error("ItemAttribs reports no attributes for an item the archive covers")
+	}
 	if !IsDir(h, 0) && ItemSize(h, 0) == 0 {
 		t.Error("ItemSize = 0 for a file with contents")
 	}

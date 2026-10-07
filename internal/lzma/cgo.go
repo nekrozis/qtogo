@@ -193,6 +193,19 @@ func ItemCRC(h Handle, index int) (uint32, bool) {
 	return uint32(C.qtogo_item_crc(h, item)), true
 }
 
+// ItemAttribs is the attribute word the archive records for item index, and
+// whether it records one at all. The word is passed through as the archive holds
+// it: the low 16 bits are DOS attributes and the high 16 are a Unix mode, present
+// only when the extension bit is set in the low half. What that means is the layer
+// above's business.
+func ItemAttribs(h Handle, index int) (uint32, bool) {
+	item := C.uint32_t(index)
+	if C.qtogo_item_has_attrib(h, item) == 0 {
+		return 0, false
+	}
+	return uint32(C.qtogo_item_attrib(h, item)), true
+}
+
 // ItemNameLen is the length of item index's name in UTF-16 units, terminator
 // included.
 func ItemNameLen(h Handle, index int) int {
