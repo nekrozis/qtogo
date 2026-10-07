@@ -22,8 +22,14 @@ type VersionDirectory struct {
 	Extension string
 }
 
-// ParseVersionDirectory reads a version directory name into the version and the
-// extension it encodes.
+// ParseVersionDirectory reads a repository directory identifier into the version and
+// the extension it carries.
+//
+// It is a best-effort reader of an identifier, not a lossless decoder of a version: a
+// directory name is an index, and what settles a version in this repository is the
+// <Version> in the Updates.xml beside the directory, not the directory's spelling.
+// Where a name can be read more than one way, the reading is refused rather than
+// chosen, so the result is a candidate a caller can act on -- see checkMinor.
 //
 // The name is "<qt><major>_<version>[_<extension>]", where <version> is the
 // version's digits without the dots: "qt6_6110" is 6.11.0 and "qt6_693" is 6.9.3.
@@ -60,6 +66,9 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 	if err != nil {
 		return VersionDirectory{}, fmt.Errorf("%q: %w", name, err)
 	}
+	if err := checkMinor(name, major, minor); err != nil {
+		return VersionDirectory{}, err
+	}
 
 	return VersionDirectory{
 		Name: name,
@@ -75,7 +84,13 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 }
 
 // EncodeVersionDirectory spells a version and an extension the way a repository
-// names a version directory, the inverse of ParseVersionDirectory.
+// names a version directory.
+//
+// It is not ParseVersionDirectory read backwards and is not defined by it: this
+// generates the path a request is made from, by the rules below, and decoding its own
+// output is a check on those rules rather than the source of them. "What the encoder
+// writes decodes back to what it was given" is a property worth having, not the
+// specification.
 //
 // The token drops the zero patch only where the repositories drop it: for a
 // preview (whose marker lives in the extension) and for a release of major 5 with
@@ -87,9 +102,9 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 // The name is checked by decoding it: encoding fails when the produced name does
 // not read back as the input. That rejects what the spelling cannot carry — a
 // two-digit major, or a one-digit minor with a two-digit patch like 6.8.12, whose
-// digits would decode as 6.81.2. A suffix other than "-preview" fails the same
-// check, because a directory names no build stamp; a version from Updates.xml
-// carries one, so it is not what this function takes.
+// digits name a directory the corpus does not cover. A suffix other than
+// "-preview" fails the same check, because a directory names no build stamp; a
+// version from Updates.xml carries one, so it is not what this function takes.
 //
 // The extension is not validated beyond that check, as decision 3 of ADR-004
 // leaves its content to the caller.
@@ -123,17 +138,67 @@ func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
 	// are read by the preview rule. What does parse must read back as the input.
 	back, err := ParseVersionDirectory(name)
 	if err != nil {
-		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which is not a version directory: %w",
-			v.Major, v.Minor, v.Patch, v.Suffix, extension, name, err)
+		// The wrapped error names the directory it could not read, so this only has
+		// to say which version failed to spell.
+		return "", fmt.Errorf("%s has no directory spelling: %w", describe(v, extension), err)
 	}
+	// Raw is not compared: it is the spelling the caller happened to arrive with, and
+	// the encoder's own output is what it is being checked against.
 	if back.Version.Major != v.Major || back.Version.Minor != v.Minor ||
 		back.Version.Patch != v.Patch || back.Version.Suffix != v.Suffix ||
 		back.Extension != extension {
-		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which reads back as %d.%d.%d%s with extension %q",
-			v.Major, v.Minor, v.Patch, v.Suffix, extension, name,
-			back.Version.Major, back.Version.Minor, back.Version.Patch, back.Version.Suffix, back.Extension)
+		return "", fmt.Errorf("%s would be spelled %q, which reads back as %s",
+			describe(v, extension), name, describe(back.Version, back.Extension))
 	}
 	return name, nil
+}
+
+// describe names a version the way a failure should: its numbers and suffix, and
+// its extension only when it has one.
+func describe(v model.Version, extension string) string {
+	described := fmt.Sprintf("%d.%d.%d%s", v.Major, v.Minor, v.Patch, v.Suffix)
+	if extension != "" {
+		described += fmt.Sprintf(" with extension %q", extension)
+	}
+	return described
+}
+
+// maxMinor is the highest minor the repository corpus spells for each major. It is
+// a constraint on what the naming scheme encodes, not a list of versions that
+// exist: "Qt 6 spells minors up to 12" is a property of the repositories' directory
+// names, and it is what separates a token this decoder can read from one it cannot.
+// A major that is not here lies outside the observed encoding domain, so its tokens
+// are refused rather than guessed at.
+//
+// A token's digits often admit more than one split -- "qt5_5152" could be 5.15.2 or
+// 5.1.52, "qt6_6810" could be 6.81.0 or 6.8.10 -- and no rule over the digits alone
+// can tell them apart. The bound settles it by rejecting a reading the scheme does
+// not spell. The consequence is deliberate: a release with a new minor needs this
+// bound updated before its directory can be read. Without the bound, "qt6_6810"
+// would mean 6.81.0 today and 6.8.10 the day that release exists -- one name with
+// two meanings.
+//
+// The layout requires no such bound, so this is a maintained constant rather than a
+// magic number: the test beside this file asserts that it matches the corpus exactly,
+// so raising it needs a captured name to justify it, and capturing a name needs it
+// raised before the name can be read. docs/compatibility.md holds the procedure and
+// what it costs.
+var maxMinor = map[int]int{
+	5: 15,
+	6: 12,
+}
+
+// checkMinor refuses a version whose minor is beyond what the corpus spells for its
+// major. A patch is a plain count with no competing reading, so it is not bounded.
+func checkMinor(name string, major, minor int) error {
+	bound, ok := maxMinor[major]
+	if !ok {
+		return fmt.Errorf("the name %q is for major %d, which the repository corpus does not cover", name, major)
+	}
+	if minor > bound {
+		return fmt.Errorf("the name %q spells minor %d, above the %d the corpus shows for Qt %d", name, minor, bound, major)
+	}
+	return nil
 }
 
 // splitVersion turns a directory's version digits into version components.
