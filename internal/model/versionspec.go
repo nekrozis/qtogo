@@ -30,10 +30,10 @@ type VersionSpec struct {
 	numbers []int // the requested numbers; empty for LatestSpec
 }
 
-// ParseVersionSpec parses a request. The grammar is deliberately strict: a
-// leading "v" and "LATEST" are rejected, because Qt's metadata writes neither
-// and accepting spellings the upstream protocol does not use invents syntax that
-// would have to be kept forever.
+// ParseVersionSpec parses a request: one to three dot-separated numbers ("6",
+// "6.8", "6.8.0") or the word "latest", and nothing else. A leading "v" and an
+// upper-case "LATEST" are rejected rather than taken as synonyms, because a
+// spelling accepted once is syntax that has to be kept forever.
 func ParseVersionSpec(raw string) (VersionSpec, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
