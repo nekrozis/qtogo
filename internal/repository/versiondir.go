@@ -60,6 +60,9 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 	if err != nil {
 		return VersionDirectory{}, fmt.Errorf("%q: %w", name, err)
 	}
+	if err := checkMinor(major, minor); err != nil {
+		return VersionDirectory{}, fmt.Errorf("%q: %w", name, err)
+	}
 
 	return VersionDirectory{
 		Name: name,
@@ -134,6 +137,38 @@ func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
 			back.Version.Major, back.Version.Minor, back.Version.Patch, back.Version.Suffix, back.Extension)
 	}
 	return name, nil
+}
+
+// maxMinor is the highest minor the repository corpus spells for each major. It is
+// a constraint on what the naming scheme encodes, not a list of versions that
+// exist: "Qt 6 spells minors up to 12" is a property of the repositories' directory
+// names, and it is what separates a token this decoder can read from one it cannot.
+// A major that is not here lies outside the observed encoding domain, so its tokens
+// are refused rather than guessed at.
+//
+// A token's digits often admit more than one split -- "qt5_5152" could be 5.15.2 or
+// 5.1.52, "qt6_6810" could be 6.81.0 or 6.8.10 -- and no rule over the digits alone
+// can tell them apart. The bound settles it by rejecting a reading the scheme does
+// not spell. The consequence is deliberate: a release with a new minor needs this
+// bound updated before its directory can be read. Without the bound, "qt6_6810"
+// would mean 6.81.0 today and 6.8.10 the day that release exists -- one name with
+// two meanings.
+var maxMinor = map[int]int{
+	5: 15,
+	6: 12,
+}
+
+// checkMinor refuses a version whose minor is beyond what the corpus spells for its
+// major. A patch is a plain count with no competing reading, so it is not bounded.
+func checkMinor(major, minor int) error {
+	bound, ok := maxMinor[major]
+	if !ok {
+		return fmt.Errorf("major %d is not one the repository corpus covers", major)
+	}
+	if minor > bound {
+		return fmt.Errorf("minor %d is above the %d the corpus spells for Qt %d", minor, bound, major)
+	}
+	return nil
 }
 
 // splitVersion turns a directory's version digits into version components.

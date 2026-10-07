@@ -54,12 +54,20 @@ build decodes it the same way; the rows below are the deliberate differences.
 | the underscored `qt6_7_*` form (`qt6_7_3_arm64_v8a`) | rejected: not a recognised shape | decodes as `6.7.3` |
 | a preview token longer than three digits (`qt6_6120_preview`) | rejected: not a recognised shape | decodes as `6.120.0-preview` |
 | a preview token of one digit (`qt6_6_preview`) | rejected: not a recognised shape | crashes on an uncaught `ValueError` |
+| a minor above what the corpus spells (`qt6_6810`, which is 6.81.0 or 6.8.10) | rejected: the digits admit two readings | decodes as `6.81.0` |
 
 The first row is a decision, not an oversight: the reference tool special-cases
 that spelling, but eight live repository target pages and every captured sample
 contain no `qt6_7_`, so it is not decoded on faith. A name that does not fit the
 rules is an error, never a guess, which means such a form can be added later with
 evidence.
+
+The last row is the same principle applied to a number rather than a shape.
+`qt6_6810` splits as minor 81 patch 0 or minor 8 patch 10, and nothing in the digits
+chooses between them — `qt5_5152` is ambiguous in exactly the same way and does mean
+5.15.2. What separates them is that the repositories spell no Qt 6 minor above 12,
+so the 6.81.0 reading is refused. The cost is stated in ADR-004 decision 5: a Qt
+release with a new minor is refused, visibly, until that bound is widened.
 
 Writing a version back to a name (`EncodeVersionDirectory`) differs once: for a
 5.x release with a zero patch and a one-digit minor, qtogo drops the patch the way

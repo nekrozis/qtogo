@@ -140,6 +140,47 @@ func TestParseVersionDirectoryRejectsNamesThatDoNotFit(t *testing.T) {
 	}
 }
 
+// A token's digits often admit more than one split -- "qt5_5152" is 5.15.2 or
+// 5.1.52, "qt6_6810" is 6.81.0 or 6.8.10 -- and no rule over the digits alone tells
+// them apart. The corpus's per-major minor bound is what settles it, so the
+// boundary is tested from both sides: the highest minor a major spells is read, one
+// past it is refused, and a patch is never bounded.
+func TestParseVersionDirectoryBoundsTheMinor(t *testing.T) {
+	accepted := []struct {
+		name string
+		want model.Version
+	}{
+		{"qt5_5152", model.Version{Raw: "5152", Major: 5, Minor: 15, Patch: 2}},
+		{"qt6_6120", model.Version{Raw: "6120", Major: 6, Minor: 12}},
+		{"qt6_695", model.Version{Raw: "695", Major: 6, Minor: 9, Patch: 5}},
+	}
+	for _, tt := range accepted {
+		got, err := ParseVersionDirectory(tt.name)
+		if err != nil {
+			t.Errorf("ParseVersionDirectory(%q) = %v, want %+v", tt.name, err, tt.want)
+			continue
+		}
+		if got.Version != tt.want {
+			t.Errorf("ParseVersionDirectory(%q) = %+v, want %+v", tt.name, got.Version, tt.want)
+		}
+	}
+
+	refused := []struct {
+		name string
+		why  string
+	}{
+		{"qt6_6810", "minor 81, where Qt 6 spells up to 12: 6.81.0 and 6.8.10 cannot be told apart"},
+		{"qt6_6130", "minor 13, one past what Qt 6 spells"},
+		{"qt5_5160", "minor 16, one past what Qt 5 spells"},
+		{"qt7_700", "a major the corpus does not cover"},
+	}
+	for _, tt := range refused {
+		if got, err := ParseVersionDirectory(tt.name); err == nil {
+			t.Errorf("ParseVersionDirectory(%q) = %+v, want a failure (%s)", tt.name, got, tt.why)
+		}
+	}
+}
+
 func TestEncodeVersionDirectorySpellsTheName(t *testing.T) {
 	tests := []struct {
 		version model.Version

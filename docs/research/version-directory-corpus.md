@@ -47,6 +47,12 @@ URL and no page, which is what keeps the tests offline.
 - **Nesting is not stable either**: a version directory may hold the metadata
   itself, a same-named child, or `<version>_<extension>` children. Path shapes are
   discovered, not assumed.
+- **The highest minor each major spells**: Qt 5 reaches 15, Qt 6 reaches 12, and the
+  largest patch seen is 12 (`qt5_51210`). Those ranges are what the decoder uses to
+  settle a token whose digits admit two splits — `qt5_5152` is 5.15.2 rather than
+  5.1.52, and `qt6_6810` is refused because 81 is above what Qt 6 spells. The bound
+  is a property of the naming scheme, not a list of released versions; ADR-004
+  decision 5 carries the reasoning and the cost.
 
 ## Re-measuring
 
