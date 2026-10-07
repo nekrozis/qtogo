@@ -29,6 +29,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 )
 
@@ -125,15 +126,20 @@ const InBufSize = uint64(C.QTGO_IN_BUF_SIZE)
 // checks first. internal/sevenzip does.
 type Handle = *C.qtogo_archive
 
-// Init prepares the decoder's tables. It must run before anything else; the layer
-// above calls it once.
+// initOnce runs qtogo_init exactly once, however many callers there are.
+var initOnce sync.Once
+
+// Init prepares the decoder's tables. It is safe to call more than once, and Open
+// calls it, so a caller cannot forget it.
 func Init() {
-	C.qtogo_init()
+	initOnce.Do(func() { C.qtogo_init() })
 }
 
 // Open reads an archive from an already-open file descriptor, allowing the decoder
 // to hold at most budget bytes. The caller keeps ownership of the descriptor.
 func Open(fd uintptr, budget uint64) (Handle, error) {
+	Init()
+
 	var result C.int
 	handle := C.qtogo_open(C.uintptr_t(fd), C.size_t(budget), &result)
 	if handle == nil {

@@ -43,6 +43,16 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)"
 
+      # Only the ANSI-C decoder is vendored (see THIRD-PARTY.md). A CPP/7zip path
+      # is the SDK's C++ side, under a different licence; this keeps one from
+      # entering the tree.
+      - name: no C++ side of the SDK
+        run: |
+          if git ls-files | grep -F 'CPP/7zip'; then
+            echo "the vendored SDK must stay C/ only; found a CPP/7zip path" >&2
+            exit 1
+          fi
+
       - name: go vet
         run: go vet ./...
 

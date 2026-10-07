@@ -37,10 +37,20 @@ struct qtogo_archive
   size_t outBufferSize;
 };
 
+/* Each block carries its size in a header, padded to the platform's widest
+   alignment: the decoder stores UInt64 arrays through this callback, and a bare
+   size_t header would leave them under-aligned on an ABI where uint64_t is more
+   strictly aligned than size_t. */
+typedef union
+{
+  size_t size;
+  max_align_t align;
+} qtogo_header;
+
 static void *qtogo_alloc_do(ISzAllocPtr p, size_t size)
 {
   qtogo_alloc *a = (qtogo_alloc *)p;
-  size_t *raw;
+  qtogo_header *raw;
 
   /* Two checks rather than one subtraction: when the accounting ever went wrong,
      `budget - used` would underflow and read as "there is room". */
@@ -51,26 +61,26 @@ static void *qtogo_alloc_do(ISzAllocPtr p, size_t size)
 
   /* The size header is added after the budget check, so the addition needs its
      own guard against wrapping. */
-  if (size > SIZE_MAX - sizeof(size_t))
+  if (size > SIZE_MAX - sizeof(qtogo_header))
     return NULL;
 
-  raw = (size_t *)malloc(sizeof(size_t) + size);
+  raw = (qtogo_header *)malloc(sizeof(qtogo_header) + size);
   if (!raw)
     return NULL;
-  *raw = size;
+  raw->size = size;
   a->used += size;
-  return (void *)(raw + 1);
+  return (void *)((char *)raw + sizeof(qtogo_header));
 }
 
 static void qtogo_alloc_undo(ISzAllocPtr p, void *addr)
 {
   qtogo_alloc *a = (qtogo_alloc *)p;
-  size_t *raw;
+  qtogo_header *raw;
 
   if (!addr)
     return;
-  raw = ((size_t *)addr) - 1;
-  a->used -= *raw;
+  raw = (qtogo_header *)((char *)addr - sizeof(qtogo_header));
+  a->used -= raw->size;
   free(raw);
 }
 

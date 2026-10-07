@@ -160,6 +160,34 @@ func TestCloseReleasesEverything(t *testing.T) {
 	}
 }
 
+// Using a closed archive is refused rather than passed to the decoder as a nil
+// handle.
+func TestUseAfterCloseIsRefused(t *testing.T) {
+	a, err := Open(fixturePath("archive", "plain.7z"), 4<<20)
+	if err != nil {
+		t.Fatalf("Open = %v", err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := a.Entry(0); !errors.Is(err, errClosed) {
+		t.Errorf("Entry after Close = %v, want errClosed", err)
+	}
+	if err := a.WriteEntry(0, io.Discard); !errors.Is(err, errClosed) {
+		t.Errorf("WriteEntry after Close = %v, want errClosed", err)
+	}
+	if got := a.Len(); got != 0 {
+		t.Errorf("Len after Close = %d, want 0", got)
+	}
+	if got := a.Held(); got != 0 {
+		t.Errorf("Held after Close = %d, want 0", got)
+	}
+	if got := a.LargestBlock(); got != 0 {
+		t.Errorf("LargestBlock after Close = %d, want 0", got)
+	}
+}
+
 func TestCloseReportsAFileItCannotClose(t *testing.T) {
 	a, err := Open(fixturePath("archive", "plain.7z"), 4<<20)
 	if err != nil {
@@ -286,6 +314,45 @@ func TestDirectoryAndEmptyEntries(t *testing.T) {
 		if entry.Name != "dir/file.txt" && len(body) != 0 {
 			t.Errorf("%s: got %d bytes, want none", entry.Name, len(body))
 		}
+	}
+}
+
+// A name can carry '\' where the format usually has '/': an archive built on
+// Windows can use it, so the layer that turns names into paths has to treat it as
+// a separator too. This fixture pins that such a name reaches the caller verbatim.
+func TestBackslashNamesAreReportedVerbatim(t *testing.T) {
+	a := openFixture(t, "backslash.7z")
+
+	want := map[string]string{
+		"sub\\nested\\f.txt": "nested",
+		"..\\escape.txt":     "escape",
+	}
+
+	files, dirs := 0, 0
+	for i := 0; i < a.Len(); i++ {
+		entry, err := a.Entry(i)
+		if err != nil {
+			t.Fatalf("Entry(%d) = %v", i, err)
+		}
+		if entry.IsDir {
+			dirs++
+			continue
+		}
+		files++
+		body := entryBytes(t, a, i)
+		if contents, ok := want[entry.Name]; !ok {
+			t.Errorf("unexpected entry %q", entry.Name)
+		} else if string(body) != contents {
+			t.Errorf("%s: contents %q, want %q", entry.Name, body, contents)
+		}
+	}
+
+	if files != len(want) {
+		t.Errorf("got %d files, want %d", files, len(want))
+	}
+	// The directories are "sub", "sub\nested" and "..".
+	if dirs != 3 {
+		t.Errorf("got %d directories, want 3", dirs)
 	}
 }
 

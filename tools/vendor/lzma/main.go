@@ -48,8 +48,9 @@ const usage = `usage: lzma-vendor <command> [arguments]
 const manifestHeader = `# Files taken unchanged from the LZMA SDK %s (see VERSION and LICENSE).
 #
 # The set is what the SDK's own decoder builds -- C/Util/7z/makefile -- plus the two
-# CRC sources that makefile pulls in through CPP/7zip/Crc.mak, confirmed by taking
-# the transitive #include closure of those files. Nothing from outside C/ is here.
+# CRC sources that makefile names from CPP/7zip/Crc.mak; both of those files are in
+# C/ too, as the transitive #include closure of the taken files confirms. Nothing
+# from outside C/ is here.
 #
 # The digest is what makes the set checkable offline: the test beside this file and
 # 'lzma-vendor verify' both read it, so a file that changed under us is caught with

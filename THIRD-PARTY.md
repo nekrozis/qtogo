@@ -19,7 +19,9 @@ byte. The other files in that directory are ours: `VERSION`, `LICENSE` and the
 manifest record the provenance, `glue.c` and `glue.h` are the bridge that makes the
 C callable from Go, and the tests keep all of it in step. Only the ANSI-C decoder
 is taken — the SDK's C++ implementation, the encoders, `Asm/` and `Util/` are
-absent, and the manifest test fails if anything outside that list appears.
+absent. The manifest test fails if anything beyond the list appears in that
+directory, and a check in CI fails if a `CPP/7zip` path appears anywhere in the
+tree.
 
 ## Updating the vendored sources
 
@@ -33,9 +35,12 @@ go run ./tools/vendor/lzma diff <old-sdk> <new-sdk>    # what would an upgrade b
 go run ./tools/vendor/lzma update 26.05 <sdk-dir>      # take it
 ```
 
-`update` refuses to run unless the sources it is copying from already match, then
-rewrites `VERSION`. After it, run the tests, read the diff, and add to
-`manifest.txt` anything the tool reports as newly reachable from the taken files.
+`update` refuses to run unless the directory it copies from holds every file
+`manifest.txt` names, so a partial or wrong directory cannot quietly become the
+vendored sources. It does not check the vendored files against upstream first — an
+update exists precisely because the two differ. It then rewrites `VERSION`. After
+it, run the tests, read the diff, and add to `manifest.txt` anything the tool
+reports as newly reachable from the taken files.
 
 **Nothing is downloaded, by the tool or by the build.** A vendored source file is
 part of the repository, and a build that fetched one would depend on a release
