@@ -27,6 +27,11 @@ import (
 	"github.com/nekrozis/qtogo/internal/lzma"
 )
 
+// UnixExtension is the bit in an attribute word that says its high 16 bits are a
+// Unix st_mode. 7-Zip sets it only for entries taken from a Unix filesystem, so
+// without it the high half means nothing.
+const UnixExtension = 0x8000
+
 // Entry is what an archive says about one item.
 type Entry struct {
 	Name  string
@@ -38,6 +43,13 @@ type Entry struct {
 	// reported as a decode failure rather than as bad bytes.
 	CRC    uint32
 	HasCRC bool
+
+	// Attribs is the attribute word the archive records for the item and HasAttribs
+	// says whether it records one. The word is passed through as it stands: the
+	// low 16 bits are DOS attributes and the high 16 a Unix mode, behind
+	// UnixExtension. Reading it is the layer above's business.
+	Attribs    uint32
+	HasAttribs bool
 }
 
 // Archive is an open 7z archive.
@@ -106,6 +118,7 @@ func (a *Archive) Entry(i int) (Entry, error) {
 		IsDir: lzma.IsDir(a.handle, i),
 	}
 	entry.CRC, entry.HasCRC = lzma.ItemCRC(a.handle, i)
+	entry.Attribs, entry.HasAttribs = lzma.ItemAttribs(a.handle, i)
 	return entry, nil
 }
 
