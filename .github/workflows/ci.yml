@@ -25,11 +25,21 @@ jobs:
           go-version: "1.27.x"
 
       # cgo builds the archive extractor, and the driver names the compiler rather than
-      # leaving it to the machine; see bootstrap/main.go for which one and why. Pinned,
-      # so a zig release cannot change what CI builds.
-      - uses: mlugg/setup-zig@v2
+      # leaving it to the machine; see bootstrap/main.go for which one and why. The
+      # version is pinned, so a zig release cannot change what CI builds.
+      - name: Restore zig
+        uses: actions/cache@v6
         with:
-          version: 0.16.0
+          path: ${{ runner.temp }}/zig
+          key: zig-0.17.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install zig
+        shell: bash
+        env:
+          ZIG_DIR: ${{ runner.temp }}/zig
+        run: |
+          bash .github/scripts/install-zig.sh 0.17.0 "$ZIG_DIR"
+          echo "$ZIG_DIR" >> "$GITHUB_PATH"
 
       - name: Build
         run: go run ./bootstrap build
@@ -39,9 +49,9 @@ jobs:
       - name: Test (race)
         run: go run ./bootstrap test -race
 
-  # The Linux C toolchain is pinned to a glibc floor rather than to whatever the runner
-  # image ships. This job is what says so out loud: one build, run inside a
-  # distribution at the floor, above it, and below it.
+  # The Linux build names the glibc it is built against rather than inheriting the
+  # runner image's, and this job is what says whether that promise holds: one build,
+  # checked for what it needs, then started where that requirement is the floor.
   glibc-floor:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -52,27 +62,44 @@ jobs:
         with:
           go-version: "1.27.x"
 
-      - uses: mlugg/setup-zig@v2
+      - name: Restore zig
+        uses: actions/cache@v6
         with:
-          version: 0.16.0
+          path: ${{ runner.temp }}/zig
+          key: zig-0.17.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install zig
+        shell: bash
+        env:
+          ZIG_DIR: ${{ runner.temp }}/zig
+        run: |
+          bash .github/scripts/install-zig.sh 0.17.0 "$ZIG_DIR"
+          echo "$ZIG_DIR" >> "$GITHUB_PATH"
 
       - name: Build
         run: go run ./bootstrap build -o dist/qtogo
 
-      - name: At the floor and above it, the binary runs
+      - name: It needs no glibc newer than the floor
+        run: |
+          floor=2.31
+          # Nothing today: the linker produces a static binary, so it needs no glibc at
+          # all and starts on distributions far older than the floor. This is what says
+          # whether that is still true, and whether the floor is still the thing
+          # protecting the binary if it stops being.
+          highest=$(objdump -T dist/qtogo 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 || true)
+          echo "highest glibc requirement: ${highest:-none, the binary is linked statically}"
+          if [ -n "$highest" ] &&
+            [ "$(printf 'GLIBC_%s\n%s\n' "$floor" "$highest" | sort -V | tail -1)" != "GLIBC_$floor" ]; then
+            echo "the binary requires $highest, which is newer than the $floor floor" >&2
+            exit 1
+          fi
+
+      - name: At the floor and above it, the binary starts
         run: |
           for image in debian:11 ubuntu:22.04; do
             echo "== $image"
             docker run --rm -v "$PWD/dist:/dist:ro" "$image" /dist/qtogo version
           done
-
-      - name: Below the floor it does not
-        run: |
-          if docker run --rm -v "$PWD/dist:/dist:ro" centos:7 /dist/qtogo version; then
-            echo "the binary started on a glibc older than the floor it claims" >&2
-            exit 1
-          fi
-          echo "refused, as it should be"
 
   lint:
     runs-on: ubuntu-latest
