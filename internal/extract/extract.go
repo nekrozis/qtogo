@@ -10,18 +10,25 @@
 // there. That last promise is what the empty destination buys: with nothing in the
 // tree, there is no link to follow, so no O_NOFOLLOW dance is needed.
 //
+// A symlink is recreated where the platform can always make one. Windows is not
+// such a platform -- whether it will depends on a machine setting -- so a link
+// entry is refused there, rather than turning one archive into different trees on
+// different machines.
+//
 // A failed extraction leaves the destination part-written. That is deliberate: the
 // destination is the caller's private staging area, which a caller discards on
 // failure rather than repairing.
 package extract
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/nekrozis/qtogo/internal/errs"
@@ -79,7 +86,7 @@ func All(ctx context.Context, a *sevenzip.Archive, dest string, limits Limits) (
 	if err != nil {
 		return Report{}, err
 	}
-	return write(ctx, a, items)
+	return write(ctx, a, root, items)
 }
 
 // check rejects a limit a caller left unset. A zero or negative bound would make
@@ -163,12 +170,22 @@ func scan(a *sevenzip.Archive, root string, limits Limits) ([]item, error) {
 			return nil, unsafeEntry(entry.Name, err)
 		}
 		k, mode := classify(entry)
-		if k != kindFile && k != kindDir {
-			return nil, unsafeEntry(entry.Name, errors.New("it is not a regular file or a directory"))
+		if k == kindOther {
+			return nil, unsafeEntry(entry.Name, errors.New("it is not a regular file, a directory or a symlink"))
+		}
+		// A Windows-target archive holds no links anyway, and whether Windows would
+		// make one depends on a machine setting -- so the same archive would give
+		// different trees on different machines. Refusing here is the metadata saying
+		// so before a byte has been written.
+		if k == kindLink && runtime.GOOS == "windows" {
+			return nil, unsafeEntry(entry.Name,
+				errors.New("the archive holds a symlink, and Windows will not create one the same way on every machine"))
 		}
 
 		it := item{index: i, name: entry.Name, path: path, kind: k, mode: mode}
-		if k == kindFile {
+		// A link's bytes are its target, and they are decoded into memory rather
+		// than streamed, so they are bounded like a file's.
+		if k == kindFile || k == kindLink {
 			if entry.Size > limits.MaxEntry {
 				return nil, overLimit("the entry %q holds %d bytes, above the %d byte entry limit",
 					it.name, entry.Size, limits.MaxEntry)
@@ -186,11 +203,15 @@ func scan(a *sevenzip.Archive, root string, limits Limits) ([]item, error) {
 	return items, nil
 }
 
-// write creates the entries scan resolved.
-func write(ctx context.Context, a *sevenzip.Archive, items []item) (Report, error) {
+// write creates the entries scan resolved. Directories and files go first and
+// links last: created earlier, a link the archive made could be the path a later
+// entry is written through, and the destination is the one place nothing is
+// followed.
+func write(ctx context.Context, a *sevenzip.Archive, root string, items []item) (Report, error) {
 	var (
 		report Report
 		dirs   []item
+		links  []item
 	)
 
 	for _, it := range items {
@@ -214,7 +235,21 @@ func write(ctx context.Context, a *sevenzip.Archive, items []item) (Report, erro
 			}
 			report.Files++
 			report.Bytes += written
+		case kindLink:
+			links = append(links, it)
 		}
+	}
+
+	for _, it := range links {
+		if err := ctx.Err(); err != nil {
+			return Report{}, cancelled(err)
+		}
+		written, err := writeLink(a, it, root)
+		if err != nil {
+			return Report{}, err
+		}
+		report.Links++
+		report.Bytes += written
 	}
 
 	// Directory modes go on once every child exists: a directory the archive marks
@@ -257,6 +292,35 @@ func writeFile(a *sevenzip.Archive, it item) (uint64, error) {
 	}
 	if err := os.Chmod(it.path, it.mode); err != nil {
 		return 0, failed("setting the mode of "+it.name, err)
+	}
+	return counted.n, nil
+}
+
+// writeLink decodes one symlink entry and creates the link.
+//
+// The target is the entry's content, so where the link points is only known once
+// it has been decoded -- which is why links are made in a pass of their own. A
+// target that leaves the destination is refused here, with the files already
+// written; the caller throws the destination away rather than repairing it.
+func writeLink(a *sevenzip.Archive, it item, root string) (uint64, error) {
+	var target bytes.Buffer
+	counted := &countWriter{w: &target}
+	if err := a.WriteEntry(it.index, counted); err != nil {
+		return 0, undecodable(err, "reading the target of %s", it.name)
+	}
+	if counted.n != it.size {
+		return 0, undecodable(errors.New("the target is not the size the archive records"), "reading %s", it.name)
+	}
+	if err := checkLink(root, it.path, target.String()); err != nil {
+		return 0, unsafeEntry(it.name, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(it.path), 0o750); err != nil {
+		return 0, failed("creating the directory for "+it.name, err)
+	}
+	// os.Symlink refuses a path that is already there, so a link cannot land on
+	// top of something another entry put down first.
+	if err := os.Symlink(target.String(), it.path); err != nil {
+		return 0, failed("creating the link "+it.name, err)
 	}
 	return counted.n, nil
 }

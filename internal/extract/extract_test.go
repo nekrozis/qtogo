@@ -247,6 +247,79 @@ func TestAllRefusesADestinationItCannotOwn(t *testing.T) {
 	})
 }
 
+// A symlink is recreated, not followed and not turned into a file: the archive's
+// own library names are the point of it, and a regular file holding the text of a
+// target would be a silent breakage.
+func TestAllCreatesSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("this build refuses link entries on Windows")
+	}
+	a := openFixture(t, "symlink.7z")
+	dir := dest(t)
+
+	report, err := All(context.Background(), a, dir, roomy())
+	if err != nil {
+		t.Fatalf("All = %v", err)
+	}
+	if report.Links != 4 {
+		t.Errorf("Links = %d, want 4", report.Links)
+	}
+
+	if got, err := os.Readlink(filepath.Join(dir, "lib", "libfoo.so")); err != nil || got != "libfoo.so.1" {
+		t.Errorf("lib/libfoo.so -> %q (%v), want libfoo.so.1", got, err)
+	}
+	// The chain of links resolves to the real file, which is what makes the
+	// reconstruction worth doing.
+	if body, err := os.ReadFile(filepath.Join(dir, "lib", "libfoo.so")); err != nil || string(body) != "the real library\n" {
+		t.Errorf("reading through lib/libfoo.so = %q (%v)", body, err)
+	}
+	// A target that steps up but stays inside is kept exactly as written.
+	if got, err := os.Readlink(filepath.Join(dir, "sub", "up-link")); err != nil || got != "../top.txt" {
+		t.Errorf("sub/up-link -> %q (%v), want ../top.txt", got, err)
+	}
+
+	// Modes come from the archive, not from the umask.
+	dirInfo, err := os.Stat(filepath.Join(dir, "lib"))
+	if err != nil {
+		t.Fatalf("stat lib: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o755 {
+		t.Errorf("lib mode = %v, want 0755", perm)
+	}
+	fileInfo, err := os.Stat(filepath.Join(dir, "top.txt"))
+	if err != nil {
+		t.Fatalf("stat top.txt: %v", err)
+	}
+	if perm := fileInfo.Mode().Perm(); perm != 0o644 {
+		t.Errorf("top.txt mode = %v, want 0644", perm)
+	}
+}
+
+func TestAllRefusesASymlinkThatLeavesTheDestination(t *testing.T) {
+	a := openFixture(t, "symlink-escape.7z")
+	dir := dest(t)
+
+	_, err := All(context.Background(), a, dir, roomy())
+	assertFailure(t, err, exitcode.Integrity, errs.CodeUnsafeArchive)
+
+	if _, err := os.Lstat(filepath.Join(dir, "lib", "evil")); !os.IsNotExist(err) {
+		t.Errorf("lib/evil was created, want it refused: %v", err)
+	}
+	if left := files(t, dir); len(left) != 0 {
+		t.Errorf("the destination holds %v, want no files", left)
+	}
+}
+
+func TestAllRefusesLinkEntriesOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows refuses link entries")
+	}
+	a := openFixture(t, "symlink.7z")
+
+	_, err := All(context.Background(), a, dest(t), roomy())
+	assertFailure(t, err, exitcode.Integrity, errs.CodeUnsafeArchive)
+}
+
 func TestAllStopsOnACancelledContext(t *testing.T) {
 	a := openFixture(t, "plain.7z")
 	dir := dest(t)

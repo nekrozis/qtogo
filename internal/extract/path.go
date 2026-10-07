@@ -39,6 +39,59 @@ func target(root, name string) (string, error) {
 	return full, nil
 }
 
+// checkLink reports whether a symlink at path, inside root, may point at target.
+//
+// The target is only ever followed, never created, so the question is not what it
+// looks like but where it ends up: resolved segment by segment from the link's own
+// directory, it has to stay inside the root. Both separators count, as they do in
+// a name.
+func checkLink(root, path, target string) error {
+	if target == "" {
+		return errors.New("its target is empty")
+	}
+	if strings.ContainsRune(target, 0) {
+		return errors.New("its target holds a NUL")
+	}
+	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, `\`) || drivePrefix(target) {
+		return errors.New("its target is absolute")
+	}
+
+	dir, err := filepath.Rel(root, filepath.Dir(path))
+	if err != nil {
+		return errors.New("its directory is not under the destination")
+	}
+	depth := 0
+	for _, segment := range splitName(filepath.ToSlash(dir)) {
+		if segment != "" && segment != "." {
+			depth++
+		}
+	}
+	for _, segment := range splitName(target) {
+		switch segment {
+		case "", ".":
+			// Nothing to resolve.
+		case "..":
+			depth--
+		default:
+			depth++
+		}
+		if depth < 0 {
+			return errors.New("its target leaves the destination")
+		}
+	}
+	return nil
+}
+
+// drivePrefix reports whether a path starts with a Windows drive, which would make
+// it absolute there.
+func drivePrefix(path string) bool {
+	if len(path) < 2 {
+		return false
+	}
+	letter := path[0] >= 'a' && path[0] <= 'z' || path[0] >= 'A' && path[0] <= 'Z'
+	return letter && path[1] == ':'
+}
+
 // splitName cuts a name at either separator. Empty segments are kept, so a doubled
 // separator shows up as one instead of being quietly collapsed.
 func splitName(name string) []string {
