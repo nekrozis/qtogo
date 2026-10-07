@@ -16,7 +16,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -24,11 +24,55 @@ jobs:
         with:
           go-version: "1.27.x"
 
-      - name: Build
-        run: go build ./...
+      # cgo builds the archive extractor, and the driver names the compiler rather than
+      # leaving it to the machine; see bootstrap/main.go for which one and why. Pinned,
+      # so a zig release cannot change what CI builds.
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
 
+      - name: Build
+        run: go run ./bootstrap build
+
+      # The race detector needs tsan symbols, which zig does not provide, so a race
+      # build is left to the host's own compiler.
       - name: Test (race)
-        run: go test -count=1 -race ./...
+        run: go run ./bootstrap test -race
+
+  # The Linux C toolchain is pinned to a glibc floor rather than to whatever the runner
+  # image ships. This job is what says so out loud: one build, run inside a
+  # distribution at the floor, above it, and below it.
+  glibc-floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.x"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build
+        run: go run ./bootstrap build -o dist/qtogo
+
+      - name: At the floor and above it, the binary runs
+        run: |
+          for image in debian:11 ubuntu:22.04; do
+            echo "== $image"
+            docker run --rm -v "$PWD/dist:/dist:ro" "$image" /dist/qtogo version
+          done
+
+      - name: Below the floor it does not
+        run: |
+          if docker run --rm -v "$PWD/dist:/dist:ro" centos:7 /dist/qtogo version; then
+            echo "the binary started on a glibc older than the floor it claims" >&2
+            exit 1
+          fi
+          echo "refused, as it should be"
 
   lint:
     runs-on: ubuntu-latest

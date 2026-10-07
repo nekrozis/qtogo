@@ -14,8 +14,8 @@ that is not implemented is absent rather than present-and-failing, so
 
 ## Build and test
 
-The build driver is a Go program, so it runs wherever the project does: no `make`, no
-shell setup, and the same command on every platform.
+The build driver is a Go program, so it needs nothing beyond the Go toolchain and the
+same command works everywhere:
 
 ```sh
 go run ./bootstrap build        # writes bin/qtogo
@@ -23,14 +23,9 @@ go run ./bootstrap check        # gofmt check, go vet, tests, golangci-lint
 go run ./bootstrap test -race   # tests with the race detector
 ```
 
-It builds for the host only — a target the driver cannot run is a target it cannot
-test — and it names the C toolchain cgo needs rather than leaving it to the
-environment. The archive extractor is C, so that toolchain matters:
-[zig](https://ziglang.org/) on Windows, which ships no compiler of its own, and the
-host's own compiler elsewhere.
-
-The race detector needs tsan symbols, which `zig cc` does not provide, so `-race` is
-left to the host compiler; on Windows that means it runs in CI rather than locally.
+The extractor is C, so the driver names the compiler cgo needs —
+[zig](https://ziglang.org/) on every platform — and always builds for the host. `-race`
+needs tsan, which zig does not provide, so it uses the host's own compiler.
 
 ## Using it
 

@@ -119,7 +119,7 @@ func runBuild(ctx context.Context, args []string) error {
 		return usageError("build takes -o <path> or nothing, not %d arguments", len(args))
 	}
 
-	env, err := buildEnv(runtime.GOOS, false)
+	env, err := buildEnv(false)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func runTest(ctx context.Context, args []string) error {
 		}
 	}
 
-	env, err := buildEnv(runtime.GOOS, race)
+	env, err := buildEnv(race)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func runCheck(ctx context.Context, args []string) error {
 	if err := checkFormatting(ctx); err != nil {
 		return err
 	}
-	env, err := buildEnv(runtime.GOOS, false)
+	env, err := buildEnv(false)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,9 @@ func runLint(ctx context.Context) error {
 
 // buildEnv is the environment a build or test runs with: the caller's, with cgo turned
 // on and the C compiler named.
-func buildEnv(goos string, race bool) ([]string, error) {
+// The platform rules live in cCompiler, which takes the host as an argument and can be
+// exercised for one the driver is not running on. This only assembles the environment.
+func buildEnv(race bool) ([]string, error) {
 	env := append(without(os.Environ(), "CGO_ENABLED"), "CGO_ENABLED=1")
 	if race {
 		// The race detector needs tsan symbols, which zig does not provide, so a race
@@ -213,7 +215,7 @@ func buildEnv(goos string, race bool) ([]string, error) {
 		// inherited CC is what makes that true whatever shell started this.
 		return without(env, "CC"), nil
 	}
-	cc, err := cCompiler(goos)
+	cc, err := cCompiler(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return nil, err
 	}
@@ -233,19 +235,48 @@ func without(env []string, name string) []string {
 	return kept
 }
 
-// cCompiler is the C compiler cgo uses on this host.
+// glibcFloor is the oldest glibc a published Linux binary may need.
 //
-// cgo builds the archive extractor, so one has to be named. Windows gets zig because it
-// ships no C compiler of its own and zig is a single binary; elsewhere the system
-// compiler is already installed and is the one the platform's headers belong to.
-func cCompiler(goos string) (string, error) {
+// A release has to start on distributions older than the machine that built it, so the
+// floor is named here rather than inherited from whatever the build host happens to
+// ship. 2.31 is Debian oldoldstable (Bullseye) while Debian 13 (Trixie) is stable, so
+// the promise is "Debian oldoldstable and anything newer than it". It is one number for
+// every architecture: a per-architecture table would be a second thing to keep current
+// for no stated gain.
+const glibcFloor = "2.31"
+
+// cCompiler is the C compiler cgo uses on this host, target and all.
+//
+// Zig is the compiler on every platform, so one toolchain decides what the C sources
+// are compiled with rather than each host's own idea of it. On Linux it is also told
+// which glibc to build against: without that the binary would link against whatever
+// the machine that built it has, and refuse to start on anything older.
+func cCompiler(goos, goarch string) (string, error) {
+	if goos == "linux" {
+		triple, err := linuxTriple(goarch)
+		if err != nil {
+			return "", err
+		}
+		return "zig cc -target " + triple + "." + glibcFloor, nil
+	}
 	switch goos {
-	case "windows":
+	case "windows", "darwin":
 		return "zig cc", nil
-	case "linux", "darwin":
-		return "cc", nil
 	default:
 		return "", fmt.Errorf("no C compiler is configured for %s", goos)
+	}
+}
+
+// linuxTriple is the target zig is given for a Linux build, already carrying the
+// architecture Go was asked for.
+func linuxTriple(goarch string) (string, error) {
+	switch goarch {
+	case "amd64":
+		return "x86_64-linux-gnu", nil
+	case "arm64":
+		return "aarch64-linux-gnu", nil
+	default:
+		return "", fmt.Errorf("no glibc target is known for linux/%s", goarch)
 	}
 }
 

@@ -22,32 +22,69 @@ func TestLdflagsStampsTheBuild(t *testing.T) {
 }
 
 func TestCCompilerNamesOnePerHost(t *testing.T) {
-	tests := map[string]string{
-		"windows": "zig cc",
-		"linux":   "cc",
-		"darwin":  "cc",
+	tests := []struct {
+		goos, goarch, want string
+	}{
+		// Linux carries the floor, which is why a compiler is named here at all: the
+		// binary has to start on distributions older than the machine that built it.
+		{"linux", "amd64", "zig cc -target x86_64-linux-gnu." + glibcFloor},
+		{"linux", "arm64", "zig cc -target aarch64-linux-gnu." + glibcFloor},
+		{"windows", "amd64", "zig cc"},
+		{"darwin", "arm64", "zig cc"},
 	}
-	for goos, want := range tests {
-		got, err := cCompiler(goos)
+	for _, tt := range tests {
+		got, err := cCompiler(tt.goos, tt.goarch)
 		if err != nil {
-			t.Errorf("cCompiler(%q) = %v", goos, err)
+			t.Errorf("cCompiler(%s/%s) = %v", tt.goos, tt.goarch, err)
 			continue
 		}
-		if got != want {
-			t.Errorf("cCompiler(%q) = %q, want %q", goos, got, want)
+		if got != tt.want {
+			t.Errorf("cCompiler(%s/%s) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
 		}
-	}
-
-	// A host the driver has not been taught is refused rather than guessed at.
-	if _, err := cCompiler("plan9"); err == nil {
-		t.Error("cCompiler(plan9) = nil, want a refusal")
 	}
 }
 
-// A race build must not use zig, which carries no tsan, and must not inherit one
-// either: the empty assignment is what makes that true whatever the shell set.
+// A host or architecture the driver has not been taught is refused rather than guessed
+// at: a wrong compiler name is a build that links the wrong thing.
+func TestCCompilerRefusesWhatItDoesNotKnow(t *testing.T) {
+	tests := []struct{ goos, goarch string }{
+		{"plan9", "amd64"},
+		{"linux", "riscv64"},
+		{"linux", "386"},
+	}
+	for _, tt := range tests {
+		if _, err := cCompiler(tt.goos, tt.goarch); err == nil {
+			t.Errorf("cCompiler(%s/%s) = nil, want a refusal", tt.goos, tt.goarch)
+		}
+	}
+}
+
+func TestLinuxTriple(t *testing.T) {
+	tests := map[string]string{
+		"amd64": "x86_64-linux-gnu",
+		"arm64": "aarch64-linux-gnu",
+	}
+	for goarch, want := range tests {
+		got, err := linuxTriple(goarch)
+		if err != nil {
+			t.Errorf("linuxTriple(%q) = %v", goarch, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("linuxTriple(%q) = %q, want %q", goarch, got, want)
+		}
+	}
+	if _, err := linuxTriple("mips"); err == nil {
+		t.Error("linuxTriple(mips) = nil, want a refusal")
+	}
+}
+
+// A race build must not use zig, which carries no tsan, and must not inherit a CC from
+// the shell that would put one back.
 func TestBuildEnvRaceLeavesTheCompilerAlone(t *testing.T) {
-	env, err := buildEnv("linux", true)
+	t.Setenv("CC", "zig cc")
+
+	env, err := buildEnv(true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,32 +96,26 @@ func TestBuildEnvRaceLeavesTheCompilerAlone(t *testing.T) {
 	}
 }
 
-// A CC inherited from the shell is replaced rather than passed along, so the compiler
-// this program chose is the one that runs.
-func TestBuildEnvReplacesAnInheritedCompiler(t *testing.T) {
+// A build runs with the compiler cCompiler names for this host, and a CC inherited from
+// the shell is replaced rather than passed along.
+func TestBuildEnvNamesTheCompilerForThisHost(t *testing.T) {
 	t.Setenv("CC", "some-other-cc")
 
-	env, err := buildEnv("windows", false)
+	want, err := cCompiler(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lastValue(env, "CC") != "zig cc" {
-		t.Errorf("CC = %q, want %q", lastValue(env, "CC"), "zig cc")
+	env, err := buildEnv(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lastValue(env, "CC"); got != want {
+		t.Errorf("CC = %q, want %q", got, want)
 	}
 	for _, entry := range env {
 		if entry == "CC=some-other-cc" {
 			t.Error("the inherited CC is still in the environment")
 		}
-	}
-}
-
-func TestBuildEnvNamesTheCompiler(t *testing.T) {
-	env, err := buildEnv("windows", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := lastValue(env, "CC"); got != "zig cc" {
-		t.Errorf("CC = %q, want %q", got, "zig cc")
 	}
 }
 
