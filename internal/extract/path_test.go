@@ -71,83 +71,77 @@ func TestTargetRefusesNamesThatLeaveTheRoot(t *testing.T) {
 	}
 }
 
-func TestCheckLinkAllowsTargetsThatStayInside(t *testing.T) {
-	root := filepath.FromSlash("/dest")
-
-	tests := []struct {
-		link   string // the link's path under the root
-		target string
-	}{
-		{"lib/a.so", "b.so"},
-		{"lib/a.so", "../outside"}, // root/outside, still inside the root
-		{"sub/up", "../top.txt"},
-		{"a/b/link", "c/d.txt"},
-		{"a/link", "./x"},
+func TestCheckLinkAllowsPlainRelativeTargets(t *testing.T) {
+	targets := []string{
+		"b.so",
+		"c/d.txt",
+		"Versions/Current/QtGui",
+		`sub\b.so`, // a backslash separates too
+		"5",
 	}
 
-	for _, tt := range tests {
-		link := filepath.Join(root, filepath.FromSlash(tt.link))
-		if err := checkLink(root, link, tt.target); err != nil {
-			t.Errorf("checkLink(%q -> %q) = %v, want it allowed", tt.link, tt.target, err)
+	for _, target := range targets {
+		if err := checkLink(target); err != nil {
+			t.Errorf("checkLink(%q) = %v, want it allowed", target, err)
 		}
 	}
 }
 
-func TestCheckLinkRefusesTargetsThatLeaveTheRoot(t *testing.T) {
-	root := filepath.FromSlash("/dest")
-
-	tests := []struct {
-		link   string
-		target string
-	}{
-		{"lib/a.so", "../../outside"},
-		{"a/b/link", "../../../x"},
-		{"link", "../outside"},
-		{"link", "/etc/passwd"},
-		{"link", `\windows\system32`},
-		{"link", "C:\\windows"},
-		{"link", ""},
-		{"link", "a\x00b"},
+// A target that steps up and comes back resolves to somewhere inside the
+// destination, and is still refused: two spellings must not name one location, or
+// an archive can make two entries collide.
+func TestCheckLinkRefusesAnythingButAPlainRelativeTarget(t *testing.T) {
+	targets := []string{
+		"",
+		"a\x00b",
+		"/etc/passwd",
+		`\windows\system32`,
+		"C:\\windows",
+		"../outside",
+		"../../outside",
+		"sub/../top.txt",
+		"../top.txt",
+		"./x",
+		".",
+		"..",
+		"a//b",
+		`a\\b`,
+		"colon:name",
+		"nul",
+		"CON",
+		"trailing.",
+		"trailing ",
+		"a\nb",
 	}
 
-	for _, tt := range tests {
-		link := filepath.Join(root, filepath.FromSlash(tt.link))
-		if err := checkLink(root, link, tt.target); err == nil {
-			t.Errorf("checkLink(%q -> %q) = nil, want a refusal", tt.link, tt.target)
+	for _, target := range targets {
+		if err := checkLink(target); err == nil {
+			t.Errorf("checkLink(%q) = nil, want a refusal", target)
 		}
 	}
 }
 
-// FuzzCheckLink holds the same invariant for a symlink that FuzzTarget holds for a
-// name: a target the check allows has to resolve inside the root. The resolution
-// here is filepath.Join's, not the check's own walk, so the two have to agree.
+// FuzzCheckLink holds the rule to its consequence: a target the check allows has to
+// resolve inside the root, from wherever the link sits. The resolution is
+// filepath.Join's, not the check's, so the two have to agree.
 func FuzzCheckLink(f *testing.F) {
-	for _, seed := range [][2]string{
-		{"lib/a.so", "b.so"},
-		{"sub/up", "../top.txt"},
-		{"lib/a.so", "../../outside"},
-		{"a/b/link", "../../../x"},
-		{"link", "/etc/passwd"},
-	} {
-		f.Add(seed[0], seed[1])
+	for _, seed := range []string{"b.so", "c/d.txt", "../top.txt", "../../outside", "/etc/passwd", `a\b`, "", "CON"} {
+		f.Add(seed)
 	}
 
 	root := filepath.FromSlash("/dest")
 	sep := string(filepath.Separator)
 	normalize := strings.NewReplacer("/", sep, `\`, sep)
+	link := filepath.Join(root, "a", "b", "link")
 
-	f.Fuzz(func(t *testing.T, name, linkTarget string) {
-		link, err := target(root, name)
-		if err != nil {
-			return
-		}
-		if err := checkLink(root, link, linkTarget); err != nil {
+	f.Fuzz(func(t *testing.T, linkTarget string) {
+		if err := checkLink(linkTarget); err != nil {
 			return
 		}
 		resolved := filepath.Join(filepath.Dir(link), normalize.Replace(linkTarget))
 		rel, err := filepath.Rel(root, resolved)
 		if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+sep) {
-			t.Fatalf("checkLink allowed %q -> %q, which resolves to %q", name, linkTarget, resolved)
+			t.Fatalf("checkLink allowed %q, which resolves to %q", linkTarget, resolved)
 		}
 	})
 }
