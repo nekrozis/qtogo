@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"os"
 	"reflect"
 	"testing"
 
@@ -166,4 +167,29 @@ func TestParseUpdatesXMLRejectsAnUnparsableVersion(t *testing.T) {
 	if _, _, err := ParseUpdatesXML("", body); err == nil {
 		t.Error("ParseUpdatesXML = nil error, want a failure for a bad version")
 	}
+}
+
+// FuzzParseUpdatesXML enforces that ParseUpdatesXML never panics on arbitrary
+// input.
+//
+// Run with: go test -fuzz FuzzParseUpdatesXML ./internal/repository/
+func FuzzParseUpdatesXML(f *testing.F) {
+	// Start from the documents the unit tests already use, so the fuzzer begins
+	// with valid shapes rather than a blank slate.
+	for _, fixture := range [][]string{
+		{"repository", "updates-basic", "Updates.xml"},
+		{"repository", "updates-minimal", "Updates.xml"},
+		{"repository", "updates-malformed", "Updates.xml"},
+	} {
+		body, err := os.ReadFile(fixturePath(fixture...))
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(body)
+	}
+
+	f.Fuzz(func(t *testing.T, body []byte) {
+		// Any input is acceptable; the only requirement is no panic.
+		ParseUpdatesXML(updatesSource, body) //nolint:errcheck
+	})
 }

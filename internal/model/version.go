@@ -9,10 +9,15 @@ import (
 
 // Version is a Qt version.
 //
-// Raw is the string the version was parsed from and is never recomputed: that
-// string, not a re-rendered one, is what builds a URL or names a directory. A
-// package version carries a build stamp, and a directory may say only "5.9", so
-// neither can be recovered from the numbers alone.
+// Raw is the representation the version was discovered in and is never
+// recomputed: a package version carries a build stamp and a directory names one as
+// a token such as "6110", so neither can be recovered from the numbers alone. Raw
+// records where a version came from, not where it goes; turning one back into a
+// repository path is the layout layer's job.
+//
+// Suffix orders a version against its neighbours, an empty suffix being newest. It
+// is part of Raw when ParseVersion built the version, but a version decoded from a
+// directory may carry a suffix its Raw does not contain.
 //
 // The zero Version means "unspecified" and is not a valid release.
 type Version struct {

@@ -42,3 +42,21 @@ unbuilt feature look the same on purpose: neither silently does nothing.
 
 "Not found" (3) and "network" (4) are deliberately separate: a script has to be
 able to tell a mistyped version from an unreachable server.
+
+## Version directory names
+
+A repository version directory (`qt6_6110`, `qt5_515_preview`) is decoded by
+`repository.ParseVersionDirectory`. Where the reference tool accepts a name, this
+build decodes it the same way; the rows below are the deliberate differences.
+
+| Directory name | qtogo | reference tool |
+| --- | --- | --- |
+| the underscored `qt6_7_*` form (`qt6_7_3_arm64_v8a`) | rejected: not a recognised shape | decodes as `6.7.3` |
+| a preview token longer than three digits (`qt6_6120_preview`) | rejected: not a recognised shape | decodes as `6.120.0-preview` |
+| a preview token of one digit (`qt6_6_preview`) | rejected: not a recognised shape | crashes on an uncaught `ValueError` |
+
+The first row is a decision, not an oversight: the reference tool special-cases
+that spelling, but eight live repository target pages and every captured sample
+contain no `qt6_7_`, so it is not decoded on faith. A name that does not fit the
+rules is an error, never a guess, which means such a form can be added later with
+evidence.
