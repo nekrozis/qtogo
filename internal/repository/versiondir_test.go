@@ -192,6 +192,9 @@ func TestEncodeVersionDirectoryRejectsWhatTheSpellingCannotCarry(t *testing.T) {
 		{"a negative component", model.Version{Major: 6, Minor: -1}, ""},
 		{"a one-digit minor with a two-digit patch", model.Version{Major: 6, Minor: 8, Patch: 12}, ""},
 		{"a preview whose extension does not carry the marker", model.Version{Major: 5, Minor: 15, Suffix: "-preview"}, ""},
+		// The produced name parses as a preview and so cannot read back as the
+		// release that was given.
+		{"a release whose extension claims a preview", model.Version{Major: 6, Minor: 11}, "preview"},
 		// A directory names no build stamp, so a version read from Updates.xml is
 		// not something this function takes.
 		{"a build stamp", model.Version{Major: 5, Minor: 15, Patch: 2, Suffix: "-0-202011130601"}, ""},

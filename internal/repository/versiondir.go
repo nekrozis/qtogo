@@ -118,15 +118,20 @@ func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
 		name += "_" + extension
 	}
 
-	// With the guards above the produced name always parses, so a failure here
-	// can only be a value that does not read back as the input.
+	// The name is checked by decoding it. It does not always parse: a release
+	// paired with an extension that claims a preview produces a name whose digits
+	// are read by the preview rule. What does parse must read back as the input.
 	back, err := ParseVersionDirectory(name)
-	if err != nil ||
-		back.Version.Major != v.Major || back.Version.Minor != v.Minor ||
+	if err != nil {
+		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which is not a version directory: %w",
+			v.Major, v.Minor, v.Patch, v.Suffix, extension, name, err)
+	}
+	if back.Version.Major != v.Major || back.Version.Minor != v.Minor ||
 		back.Version.Patch != v.Patch || back.Version.Suffix != v.Suffix ||
 		back.Extension != extension {
-		return "", fmt.Errorf("%d.%d.%d%s with extension %q encodes as %q, which does not read back as the input",
-			v.Major, v.Minor, v.Patch, v.Suffix, extension, name)
+		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which reads back as %d.%d.%d%s with extension %q",
+			v.Major, v.Minor, v.Patch, v.Suffix, extension, name,
+			back.Version.Major, back.Version.Minor, back.Version.Patch, back.Version.Suffix, back.Extension)
 	}
 	return name, nil
 }
