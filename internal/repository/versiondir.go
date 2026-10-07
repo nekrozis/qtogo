@@ -87,10 +87,21 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 // The name is checked by decoding it: encoding fails when the produced name does
 // not read back as the input. That rejects what the spelling cannot carry — a
 // two-digit major, or a one-digit minor with a two-digit patch like 6.8.12, whose
-// digits would decode as 6.81.2.
+// digits would decode as 6.81.2. A suffix other than "-preview" fails the same
+// check, because a directory names no build stamp; a version from Updates.xml
+// carries one, so it is not what this function takes.
+//
+// The extension is not validated beyond that check, as decision 3 of ADR-004
+// leaves its content to the caller.
 func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
+	// A version with no major is unspecified or not a Qt release, and a negative
+	// component is not a version: neither has a directory spelling, and the round
+	// trip below cannot catch either — "qt0_000" reads back as 0.0.0.
+	if v.Major < 1 || v.Minor < 0 || v.Patch < 0 {
+		return "", fmt.Errorf("%d.%d.%d has no directory spelling", v.Major, v.Minor, v.Patch)
+	}
 	if v.Major > 9 {
-		return "", fmt.Errorf("version %v: a two-digit major has no directory spelling", v)
+		return "", fmt.Errorf("%d.%d.%d: a two-digit major has no directory spelling", v.Major, v.Minor, v.Patch)
 	}
 
 	token := strconv.Itoa(v.Major) + strconv.Itoa(v.Minor)
@@ -107,14 +118,15 @@ func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
 		name += "_" + extension
 	}
 
+	// With the guards above the produced name always parses, so a failure here
+	// can only be a value that does not read back as the input.
 	back, err := ParseVersionDirectory(name)
-	if err != nil {
-		return "", fmt.Errorf("encoding %v would produce %q, which does not parse: %w", v, name, err)
-	}
-	if back.Version.Major != v.Major || back.Version.Minor != v.Minor || back.Version.Patch != v.Patch ||
-		back.Version.Suffix != v.Suffix || back.Extension != extension {
-		return "", fmt.Errorf("encoding %v with extension %q produces %q, which decodes as %v/%q",
-			v, extension, name, back.Version, back.Extension)
+	if err != nil ||
+		back.Version.Major != v.Major || back.Version.Minor != v.Minor ||
+		back.Version.Patch != v.Patch || back.Version.Suffix != v.Suffix ||
+		back.Extension != extension {
+		return "", fmt.Errorf("%d.%d.%d%s with extension %q encodes as %q, which does not read back as the input",
+			v.Major, v.Minor, v.Patch, v.Suffix, extension, name)
 	}
 	return name, nil
 }

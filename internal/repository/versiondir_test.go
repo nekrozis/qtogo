@@ -188,9 +188,13 @@ func TestEncodeVersionDirectoryRejectsWhatTheSpellingCannotCarry(t *testing.T) {
 		ext     string
 	}{
 		{"a two-digit major", model.Version{Major: 10}, ""},
+		{"the zero version", model.Version{}, ""},
+		{"a negative component", model.Version{Major: 6, Minor: -1}, ""},
 		{"a one-digit minor with a two-digit patch", model.Version{Major: 6, Minor: 8, Patch: 12}, ""},
 		{"a preview whose extension does not carry the marker", model.Version{Major: 5, Minor: 15, Suffix: "-preview"}, ""},
-		{"a negative component", model.Version{Major: 6, Minor: -1}, ""},
+		// A directory names no build stamp, so a version read from Updates.xml is
+		// not something this function takes.
+		{"a build stamp", model.Version{Major: 5, Minor: 15, Patch: 2, Suffix: "-0-202011130601"}, ""},
 	}
 
 	for _, tt := range tests {
