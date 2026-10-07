@@ -14,34 +14,23 @@ that is not implemented is absent rather than present-and-failing, so
 
 ## Build and test
 
-Linux and macOS:
+The build driver is a Go program, so it runs wherever the project does: no `make`, no
+shell setup, and the same command on every platform.
 
 ```sh
-make build      # writes bin/qtogo
-make check      # gofmt check, go vet, tests, golangci-lint
-make test-race  # tests with the race detector
+go run ./bootstrap build        # writes bin/qtogo
+go run ./bootstrap check        # gofmt check, go vet, tests, golangci-lint
+go run ./bootstrap test -race   # tests with the race detector
 ```
 
-Windows, using the Go commands directly:
+It builds for the host only — a target the driver cannot run is a target it cannot
+test — and it names the C toolchain cgo needs rather than leaving it to the
+environment. The archive extractor is C, so that toolchain matters:
+[zig](https://ziglang.org/) on Windows, which ships no compiler of its own, and the
+host's own compiler elsewhere.
 
-```powershell
-go build ./...
-go test ./...
-go vet ./...
-gofmt -l .      # must print nothing
-```
-
-CGO is used for the archive extractor, which on Windows is built with
-[zig](https://ziglang.org/)'s C compiler:
-
-```powershell
-$env:CGO_ENABLED = '1'
-$env:CC = 'zig cc'
-go build ./...
-```
-
-The race detector needs tsan symbols, which `zig cc` does not provide, so on
-Windows `-race` runs in CI rather than locally.
+The race detector needs tsan symbols, which `zig cc` does not provide, so `-race` is
+left to the host compiler; on Windows that means it runs in CI rather than locally.
 
 ## Using it
 
