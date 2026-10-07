@@ -20,3 +20,25 @@ manifest record the provenance, `glue.c` and `glue.h` are the bridge that makes 
 C callable from Go, and the tests keep all of it in step. Only the ANSI-C decoder
 is taken — the SDK's C++ implementation, the encoders, `Asm/` and `Util/` are
 absent, and the manifest test fails if anything outside that list appears.
+
+## Updating the vendored sources
+
+`go run ./tools/vendor/lzma` compares the vendored files with an unpacked SDK,
+copies a new version over them, and shows what changed between two upstream
+releases. It reads a directory the maintainer already has:
+
+```
+go run ./tools/vendor/lzma verify <sdk-dir>            # do the vendored files match upstream?
+go run ./tools/vendor/lzma diff <old-sdk> <new-sdk>    # what would an upgrade bring?
+go run ./tools/vendor/lzma update 26.05 <sdk-dir>      # take it
+```
+
+`update` refuses to run unless the sources it is copying from already match, then
+rewrites `VERSION`. After it, run the tests, read the diff, and add to
+`manifest.txt` anything the tool reports as newly reachable from the taken files.
+
+**Nothing is downloaded, by the tool or by the build.** A vendored source file is
+part of the repository, and a build that fetched one would depend on a release
+archive still being online — which is not a property this project controls. For the
+same reason the tool is not part of CI: the ordinary check that the directory and
+the manifest agree is a Go test, which needs no upstream copy.
