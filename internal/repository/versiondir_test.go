@@ -140,6 +140,97 @@ func TestParseVersionDirectoryRejectsNamesThatDoNotFit(t *testing.T) {
 	}
 }
 
+// A token's digits often admit more than one split -- "qt5_5152" is 5.15.2 or
+// 5.1.52, "qt6_6810" is 6.81.0 or 6.8.10 -- and no rule over the digits alone tells
+// them apart. The corpus's per-major minor bound is what settles it, so the
+// boundary is tested from both sides: the highest minor a major spells is read, one
+// past it is refused, and a patch is never bounded.
+func TestParseVersionDirectoryBoundsTheMinor(t *testing.T) {
+	accepted := []struct {
+		name string
+		want model.Version
+	}{
+		{"qt5_5152", model.Version{Raw: "5152", Major: 5, Minor: 15, Patch: 2}},
+		{"qt6_6120", model.Version{Raw: "6120", Major: 6, Minor: 12}},
+		{"qt6_695", model.Version{Raw: "695", Major: 6, Minor: 9, Patch: 5}},
+	}
+	for _, tt := range accepted {
+		got, err := ParseVersionDirectory(tt.name)
+		if err != nil {
+			t.Errorf("ParseVersionDirectory(%q) = %v, want %+v", tt.name, err, tt.want)
+			continue
+		}
+		if got.Version != tt.want {
+			t.Errorf("ParseVersionDirectory(%q) = %+v, want %+v", tt.name, got.Version, tt.want)
+		}
+	}
+
+	refused := []struct {
+		name string
+		why  string
+	}{
+		{"qt6_6810", "minor 81, where Qt 6 spells up to 12: 6.81.0 and 6.8.10 cannot be told apart"},
+		{"qt6_6130", "minor 13, one past what Qt 6 spells"},
+		{"qt5_5160", "minor 16, one past what Qt 5 spells"},
+		{"qt7_700", "a major the corpus does not cover"},
+	}
+	for _, tt := range refused {
+		if got, err := ParseVersionDirectory(tt.name); err == nil {
+			t.Errorf("ParseVersionDirectory(%q) = %+v, want a failure (%s)", tt.name, got, tt.why)
+		}
+	}
+}
+
+// The bound is a snapshot of the corpus, so the two have to agree exactly: raising it
+// with no captured name to justify it fails here, and so does adding a name without
+// raising it. That is what keeps a maintained constant from becoming a number
+// somebody tuned. The split is done without the bound, so a name the bound would
+// refuse still counts as evidence.
+func TestMaxMinorMatchesTheCorpus(t *testing.T) {
+	body, err := os.ReadFile(fixturePath("repository", "version-directory-names.txt"))
+	if err != nil {
+		t.Fatalf("reading the name list: %v", err)
+	}
+
+	observed := map[int]int{}
+	for _, name := range strings.Split(string(body), "\n") {
+		name = strings.TrimSpace(name)
+		parts := strings.SplitN(name, "_", 3)
+		if name == "" || len(parts) < 2 || !isQtMajor(parts[0]) || !allDigits(parts[1]) {
+			continue // the dev channel, and anything else that is not a version
+		}
+		extension := ""
+		if len(parts) == 3 {
+			extension = parts[2]
+		}
+		major, minor, _, _, err := splitVersion(parts[1], strings.Contains(extension, "preview"))
+		if err != nil {
+			continue // a token the rules already refuse
+		}
+		if minor > observed[major] {
+			observed[major] = minor
+		}
+	}
+
+	if len(observed) == 0 {
+		t.Fatal("the corpus holds no version directories")
+	}
+	for major, minor := range observed {
+		bound, ok := maxMinor[major]
+		switch {
+		case !ok:
+			t.Errorf("the corpus spells major %d (up to minor %d), which maxMinor does not cover", major, minor)
+		case bound != minor:
+			t.Errorf("maxMinor[%d] = %d, but the corpus spells minor %d: move the bound with the corpus", major, bound, minor)
+		}
+	}
+	for major := range maxMinor {
+		if _, ok := observed[major]; !ok {
+			t.Errorf("maxMinor covers major %d, which the corpus does not spell", major)
+		}
+	}
+}
+
 func TestEncodeVersionDirectorySpellsTheName(t *testing.T) {
 	tests := []struct {
 		version model.Version
