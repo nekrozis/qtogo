@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -137,4 +138,151 @@ func TestParseVersionDirectoryRejectsNamesThatDoNotFit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEncodeVersionDirectorySpellsTheName(t *testing.T) {
+	tests := []struct {
+		version model.Version
+		ext     string
+		want    string
+	}{
+		{model.Version{Major: 6, Minor: 11}, "", "qt6_6110"},
+		{model.Version{Major: 6, Minor: 8}, "", "qt6_680"},
+		{model.Version{Major: 6, Minor: 11, Patch: 3}, "", "qt6_6113"},
+		{model.Version{Major: 5, Minor: 15, Patch: 2}, "", "qt5_5152"},
+
+		// Major 5 with a zero patch and a one-digit minor drops the patch.
+		{model.Version{Major: 5, Minor: 9}, "", "qt5_59"},
+		{model.Version{Major: 5, Minor: 6}, "src_doc_examples", "qt5_56_src_doc_examples"},
+
+		// Two-digit minors are written as they are.
+		{model.Version{Major: 5, Minor: 10}, "", "qt5_5100"},
+		{model.Version{Major: 5, Minor: 15}, "", "qt5_5150"},
+
+		// A preview carries only major and minor; the marker is in the extension.
+		{model.Version{Major: 5, Minor: 15, Suffix: "-preview"}, "preview", "qt5_515_preview"},
+		{model.Version{Major: 6, Minor: 2, Suffix: "-preview"}, "wasm_preview", "qt6_62_wasm_preview"},
+
+		// The extension is taken whole.
+		{model.Version{Major: 6, Minor: 11}, "msvc2022_64", "qt6_6110_msvc2022_64"},
+		{model.Version{Major: 6, Minor: 11}, "msvc2022_arm64_cross_compiled", "qt6_6110_msvc2022_arm64_cross_compiled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got, err := EncodeVersionDirectory(tt.version, tt.ext)
+			if err != nil {
+				t.Fatalf("EncodeVersionDirectory(%v, %q) = %v", tt.version, tt.ext, err)
+			}
+			if got != tt.want {
+				t.Errorf("name = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEncodeVersionDirectoryRejectsWhatTheSpellingCannotCarry(t *testing.T) {
+	tests := []struct {
+		why     string
+		version model.Version
+		ext     string
+	}{
+		{"a two-digit major", model.Version{Major: 10}, ""},
+		{"the zero version", model.Version{}, ""},
+		{"a negative component", model.Version{Major: 6, Minor: -1}, ""},
+		{"a one-digit minor with a two-digit patch", model.Version{Major: 6, Minor: 8, Patch: 12}, ""},
+		{"a preview whose extension does not carry the marker", model.Version{Major: 5, Minor: 15, Suffix: "-preview"}, ""},
+		// The produced name parses as a preview and so cannot read back as the
+		// release that was given.
+		{"a release whose extension claims a preview", model.Version{Major: 6, Minor: 11}, "preview"},
+		// A directory names no build stamp, so a version read from Updates.xml is
+		// not something this function takes.
+		{"a build stamp", model.Version{Major: 5, Minor: 15, Patch: 2, Suffix: "-0-202011130601"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.why, func(t *testing.T) {
+			if got, err := EncodeVersionDirectory(tt.version, tt.ext); err == nil {
+				t.Fatalf("EncodeVersionDirectory(%v, %q) = %q, want a failure", tt.version, tt.ext, got)
+			}
+		})
+	}
+}
+
+// TestEncodeVersionDirectoryRoundTripsTheCorpus runs the ADR-004 acceptance
+// criterion: every version directory name the repositories actually use must
+// re-encode to itself.
+func TestEncodeVersionDirectoryRoundTripsTheCorpus(t *testing.T) {
+	body, err := os.ReadFile(fixturePath("repository", "version-directory-names.txt"))
+	if err != nil {
+		t.Fatalf("reading the name list: %v", err)
+	}
+
+	checked := 0
+	for _, line := range strings.Split(string(body), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+
+		vd, err := ParseVersionDirectory(name)
+		if err != nil {
+			continue // the dev-channel entries are not version directories
+		}
+		encoded, err := EncodeVersionDirectory(vd.Version, vd.Extension)
+		if err != nil {
+			t.Errorf("%s: EncodeVersionDirectory(%v, %q) = %v", name, vd.Version, vd.Extension, err)
+			continue
+		}
+		if encoded != name {
+			t.Errorf("%s re-encodes as %q", name, encoded)
+		}
+		checked++
+	}
+
+	// 262 of the 269 names in the list are version directories.
+	if checked != 262 {
+		t.Errorf("round-tripped %d names, want 262", checked)
+	}
+}
+
+// FuzzVersionDirectoryRoundTrip asserts the two properties the spelling provides,
+// both on versions rather than names: a name that decodes re-encodes to a name
+// that decodes to the same version (the names can differ — "qt5_590" decodes to
+// 5.9.0 but the only correct encoding is "qt5_59"), and encoding is idempotent
+// through decode.
+func FuzzVersionDirectoryRoundTrip(f *testing.F) {
+	for _, name := range []string{
+		"qt6_6110_msvc2022_64", "qt5_5152", "qt5_59_src_doc_examples",
+		"qt6_62_wasm_preview", "qt6_6110", "qt5_590", "not a directory",
+	} {
+		f.Add(name)
+	}
+
+	f.Fuzz(func(t *testing.T, name string) {
+		vd, err := ParseVersionDirectory(name)
+		if err != nil {
+			return // names the decoder rejects are not this contract's input
+		}
+
+		encoded, err := EncodeVersionDirectory(vd.Version, vd.Extension)
+		if err != nil {
+			return // a decoded shape the spelling cannot write back is allowed
+		}
+		again, err := ParseVersionDirectory(encoded)
+		if err != nil {
+			t.Fatalf("encode(decode(%q)) = %q, which does not parse: %v", name, encoded, err)
+		}
+		if again.Version.Major != vd.Version.Major || again.Version.Minor != vd.Version.Minor ||
+			again.Version.Patch != vd.Version.Patch || again.Version.Suffix != vd.Version.Suffix ||
+			again.Extension != vd.Extension {
+			t.Fatalf("round trip %q -> %q changed the version: %+v/%q vs %+v/%q",
+				name, encoded, again.Version, again.Extension, vd.Version, vd.Extension)
+		}
+
+		second, err := EncodeVersionDirectory(again.Version, again.Extension)
+		if err != nil || second != encoded {
+			t.Fatalf("encoding is not idempotent: %q encoded twice as %q (%v)", name, second, err)
+		}
+	})
 }

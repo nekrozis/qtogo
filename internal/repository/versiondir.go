@@ -74,6 +74,68 @@ func ParseVersionDirectory(name string) (VersionDirectory, error) {
 	}, nil
 }
 
+// EncodeVersionDirectory spells a version and an extension the way a repository
+// names a version directory, the inverse of ParseVersionDirectory.
+//
+// The token drops the zero patch only where the repositories drop it: for a
+// preview (whose marker lives in the extension) and for a release of major 5 with
+// a one-digit minor ("qt5_56", "qt5_59"). Everything else writes every digit
+// ("qt5_5100", "qt6_680"). The extension is taken verbatim; deriving an
+// architecture name is the caller's business, because the vocabulary changes
+// between releases.
+//
+// The name is checked by decoding it: encoding fails when the produced name does
+// not read back as the input. That rejects what the spelling cannot carry — a
+// two-digit major, or a one-digit minor with a two-digit patch like 6.8.12, whose
+// digits would decode as 6.81.2. A suffix other than "-preview" fails the same
+// check, because a directory names no build stamp; a version from Updates.xml
+// carries one, so it is not what this function takes.
+//
+// The extension is not validated beyond that check, as decision 3 of ADR-004
+// leaves its content to the caller.
+func EncodeVersionDirectory(v model.Version, extension string) (string, error) {
+	// A version with no major is unspecified or not a Qt release, and a negative
+	// component is not a version: neither has a directory spelling, and the round
+	// trip below cannot catch either — "qt0_000" reads back as 0.0.0.
+	if v.Major < 1 || v.Minor < 0 || v.Patch < 0 {
+		return "", fmt.Errorf("%d.%d.%d has no directory spelling", v.Major, v.Minor, v.Patch)
+	}
+	if v.Major > 9 {
+		return "", fmt.Errorf("%d.%d.%d: a two-digit major has no directory spelling", v.Major, v.Minor, v.Patch)
+	}
+
+	token := strconv.Itoa(v.Major) + strconv.Itoa(v.Minor)
+
+	// The zero patch is written except where the repositories drop it: for a
+	// preview, and for a 5.x release with a one-digit minor.
+	dropPatch := v.Suffix == "-preview" || (v.Major == 5 && v.Patch == 0 && v.Minor < 10)
+	if !dropPatch {
+		token += strconv.Itoa(v.Patch)
+	}
+
+	name := "qt" + strconv.Itoa(v.Major) + "_" + token
+	if extension != "" {
+		name += "_" + extension
+	}
+
+	// The name is checked by decoding it. It does not always parse: a release
+	// paired with an extension that claims a preview produces a name whose digits
+	// are read by the preview rule. What does parse must read back as the input.
+	back, err := ParseVersionDirectory(name)
+	if err != nil {
+		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which is not a version directory: %w",
+			v.Major, v.Minor, v.Patch, v.Suffix, extension, name, err)
+	}
+	if back.Version.Major != v.Major || back.Version.Minor != v.Minor ||
+		back.Version.Patch != v.Patch || back.Version.Suffix != v.Suffix ||
+		back.Extension != extension {
+		return "", fmt.Errorf("%d.%d.%d%s with extension %q produces %q, which reads back as %d.%d.%d%s with extension %q",
+			v.Major, v.Minor, v.Patch, v.Suffix, extension, name,
+			back.Version.Major, back.Version.Minor, back.Version.Patch, back.Version.Suffix, back.Extension)
+	}
+	return name, nil
+}
+
 // splitVersion turns a directory's version digits into version components.
 //
 // A release spells the version in the fewest digits that fit: two digits are

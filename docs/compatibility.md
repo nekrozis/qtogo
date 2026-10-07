@@ -60,3 +60,10 @@ that spelling, but eight live repository target pages and every captured sample
 contain no `qt6_7_`, so it is not decoded on faith. A name that does not fit the
 rules is an error, never a guess, which means such a form can be added later with
 evidence.
+
+Writing a version back to a name (`EncodeVersionDirectory`) differs once: for a
+5.x release with a zero patch and a one-digit minor, qtogo drops the patch the way
+the repositories do — 5.3.0 encodes as `qt5_53`, or `qt5_53_src_doc_examples` with
+that extension — and so on through 5.8.0 — while the reference tool drops it only
+for 5.9.0 and would write `qt5_530_src_doc_examples`, a directory that exists
+nowhere.
