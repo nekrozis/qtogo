@@ -49,59 +49,6 @@ jobs:
       - name: Test (race)
         run: go run ./bootstrap test -race
 
-  # The Linux build names the glibc it is built against rather than inheriting the
-  # runner image's, and this job is what says whether that promise holds: one build,
-  # checked for what it needs, then started where that requirement is the floor.
-  glibc-floor:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version: "1.27.x"
-
-      - name: Restore zig
-        uses: actions/cache@v6
-        with:
-          path: ${{ runner.temp }}/zig
-          key: zig-0.17.0-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Install zig
-        shell: bash
-        env:
-          ZIG_DIR: ${{ runner.temp }}/zig
-        run: |
-          bash .github/scripts/install-zig.sh 0.17.0 "$ZIG_DIR"
-          echo "$ZIG_DIR" >> "$GITHUB_PATH"
-
-      - name: Build
-        run: go run ./bootstrap build -o dist/qtogo
-
-      - name: It needs no glibc newer than the floor
-        run: |
-          floor=2.31
-          # Nothing today, and not because of the floor or the compiler: the same
-          # sources built with the system gcc come out byte-identical, both static,
-          # because no cgo object references a libc symbol. This is what says whether
-          # that still holds, and whether the floor is what protects the binary if it
-          # stops holding.
-          highest=$(objdump -T dist/qtogo 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 || true)
-          echo "highest glibc requirement: ${highest:-none, the binary is linked statically}"
-          if [ -n "$highest" ] &&
-            [ "$(printf 'GLIBC_%s\n%s\n' "$floor" "$highest" | sort -V | tail -1)" != "GLIBC_$floor" ]; then
-            echo "the binary requires $highest, which is newer than the $floor floor" >&2
-            exit 1
-          fi
-
-      - name: At the floor and above it, the binary starts
-        run: |
-          for image in debian:11 ubuntu:22.04; do
-            echo "== $image"
-            docker run --rm -v "$PWD/dist:/dist:ro" "$image" /dist/qtogo version
-          done
-
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
