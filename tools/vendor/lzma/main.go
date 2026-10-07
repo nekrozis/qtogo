@@ -34,6 +34,8 @@ import (
 
 const usage = `usage: lzma-vendor <command> [arguments]
 
+  status [<sdk-dir>]             one line per check: the vendored version, the
+                                 manifest, and upstream when a directory is given
   verify [<sdk-dir>]             check the vendored files against manifest.txt, and
                                  against upstream when a directory is given
   update <version> <sdk-dir>     take a new upstream version: copy the files,
@@ -41,6 +43,9 @@ const usage = `usage: lzma-vendor <command> [arguments]
   diff <old-dir> <new-dir>       show what changed between two upstream copies
 
 <upstream-dir> is an unpacked LZMA SDK, or its C directory. Nothing is downloaded.
+
+verify and status exit non-zero when the vendored files and manifest disagree, or
+when they differ from the upstream copy they were given.
 `
 
 // manifestHeader is rewritten by update, so the file stays self-describing after a
@@ -67,6 +72,15 @@ func main() {
 
 	var err error
 	switch os.Args[1] {
+	case "status":
+		switch len(os.Args) {
+		case 2:
+			err = runStatus("")
+		case 3:
+			err = runStatus(os.Args[2])
+		default:
+			err = fmt.Errorf("status takes at most one directory")
+		}
 	case "verify":
 		switch len(os.Args) {
 		case 2:
@@ -158,6 +172,27 @@ func versionOf(dir string) string {
 	return strings.TrimSpace(string(body))
 }
 
+// upstreamVersion reads the version out of an unpacked SDK's own documentation. An
+// SDK has no VERSION file -- that one is ours -- so the first line of
+// DOC/lzma-sdk.txt is where it says what it is. "" means only that it could not be
+// read, which is not a failure: the version is a convenience and the byte comparison
+// is the check.
+func upstreamVersion(dir string) string {
+	// The caller may have handed over the SDK or its C directory, so the parent is
+	// worth a look as well.
+	for _, root := range []string{dir, filepath.Dir(dir)} {
+		body, err := os.ReadFile(filepath.Join(root, "DOC", "lzma-sdk.txt"))
+		if err != nil {
+			continue
+		}
+		first, _, _ := strings.Cut(string(body), "\n")
+		if version, ok := strings.CutPrefix(strings.TrimSpace(first), "LZMA SDK "); ok {
+			return version
+		}
+	}
+	return ""
+}
+
 // cDir accepts either the unpacked SDK or its C directory, because the archive
 // unpacks to a tree and the maintainer should not have to remember which.
 func cDir(dir string) (string, error) {
@@ -168,6 +203,85 @@ func cDir(dir string) (string, error) {
 		return dir, nil
 	}
 	return "", fmt.Errorf("%s is not a directory", dir)
+}
+
+// runStatus prints where the vendored copy stands, one line per check, so a
+// maintainer does not have to read verify's per-file list to find out. It fails when
+// that state is not clean, which is what makes it usable as a check too.
+func runStatus(upstream string) error {
+	dir, err := vendorDir()
+	if err != nil {
+		return err
+	}
+	entries, err := readManifest(dir)
+	if err != nil {
+		return err
+	}
+
+	drift := 0
+	for _, e := range entries {
+		body, readErr := os.ReadFile(filepath.Join(dir, e.name))
+		if readErr != nil || digestOf(body) != e.digest {
+			drift++
+		}
+	}
+
+	var upstreamC string
+	if upstream != "" {
+		upstreamC, err = cDir(upstream)
+		if err != nil {
+			return err
+		}
+	}
+
+	label := "not given"
+	if upstreamC != "" {
+		label = upstreamC
+		if version := upstreamVersion(upstream); version != "" {
+			label += " (" + version + ")"
+		}
+	}
+
+	differ := 0
+	if upstreamC != "" {
+		for _, e := range entries {
+			want, readErr := os.ReadFile(filepath.Join(upstreamC, e.name))
+			if readErr != nil {
+				differ++
+				continue
+			}
+			got, readErr := os.ReadFile(filepath.Join(dir, e.name))
+			if readErr != nil || !bytes.Equal(got, want) {
+				differ++
+			}
+		}
+	}
+
+	var problems []string
+	if drift > 0 {
+		problems = append(problems, "manifest drift")
+	}
+	if differ > 0 {
+		problems = append(problems, "upstream difference")
+	}
+	state := "clean"
+	if len(problems) > 0 {
+		state = strings.Join(problems, ", ")
+	}
+
+	fmt.Println("LZMA SDK")
+	fmt.Printf("  vendored  %s\n", versionOf(dir))
+	fmt.Printf("  manifest  %d files, %d match\n", len(entries), len(entries)-drift)
+	fmt.Printf("  upstream  %s\n", label)
+	if upstreamC != "" {
+		fmt.Printf("  compared  %d files, %d match\n", len(entries), len(entries)-differ)
+	}
+	fmt.Printf("  status    %s\n", state)
+
+	if state != "clean" {
+		return fmt.Errorf("the vendored sources show %s", state)
+	}
+	return nil
 }
 
 func runVerify(upstream string) error {

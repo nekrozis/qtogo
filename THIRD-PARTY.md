@@ -30,10 +30,16 @@ copies a new version over them, and shows what changed between two upstream
 releases. It reads a directory the maintainer already has:
 
 ```
+go run ./tools/vendor/lzma status [<sdk-dir>]          # where does the vendored copy stand?
 go run ./tools/vendor/lzma verify <sdk-dir>            # do the vendored files match upstream?
 go run ./tools/vendor/lzma diff <old-sdk> <new-sdk>    # what would an upgrade bring?
 go run ./tools/vendor/lzma update 26.05 <sdk-dir>      # take it
 ```
+
+`status` is the one to run first: it prints the vendored version, whether the files
+still match `manifest.txt`, and — when given a directory — the upstream version and
+whether the bytes agree. `status` and `verify` both exit non-zero when something
+does not match.
 
 `update` refuses to run unless the directory it copies from holds every file
 `manifest.txt` names, so a partial or wrong directory cannot quietly become the
