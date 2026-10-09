@@ -48,6 +48,14 @@ linters:
       - path: ^bootstrap/
         linters: [gosec]
         text: G204|G602|G702|G703
+      # Relocation writes files a Qt build has to read, so 0644 is the mode they
+      # need rather than a lax one: written 0600 and widened once complete, which
+      # is what G302 and the traversal taint (G703) report. Every path is below
+      # the staging root the caller owns, and the walk that builds the paths
+      # refuses anything that is not an ordinary name.
+      - path: ^internal/relocate/
+        linters: [gosec]
+        text: G302|G703
 
 formatters:
   enable:

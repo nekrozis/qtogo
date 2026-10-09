@@ -60,6 +60,29 @@ needs one; listing every target at once is a mode this build does not have yet.
 "Not found" (3) and "network" (4) are deliberately separate: a script has to be
 able to tell a mistyped version from an unreachable server.
 
+## Relocation
+
+An extracted tree is corrected so it runs from wherever it is installed (ADR-011).
+Where the reference tool and this build do the same thing, nothing is listed; the
+rows below are the deliberate differences.
+
+| What | qtogo | reference tool |
+| --- | --- | --- |
+| `lib/*.la` (libtool archives) | **deleted** | rewritten in place to the new prefix |
+| `bin/qt.conf`, `lib/pkgconfig/*.pc` | the prefix is **relative** (`Prefix=..`, `prefix=${pcfiledir}/../..`, and mac's `-F` as `${pcfiledir}/..`) | the prefix is the **absolute** install path |
+
+The first row keeps the byte-identical promise that two installs of the same request
+produce the same tree: a `.la` file's only anchor is an absolute `libdir`, so it
+cannot be made to work from any path, and nothing in a Qt build reads one (ADR-011
+decision 4). Rewriting it, as the reference tool does, would leave a value that
+depends on where the tree landed.
+
+The second row is the same rule applied to the files that make the tree relocate:
+this build writes only relative or symbolic values, so nothing it produces contains
+the install path, while the reference tool writes the path it is installing to.
+`lib/*.prl` is **not** listed because both builds write the same thing there, the
+qmake variable `$$[QT_INSTALL_LIBS]`.
+
 ## Version directory names
 
 A repository version directory (`qt6_6110`, `qt5_515_preview`) is decoded by

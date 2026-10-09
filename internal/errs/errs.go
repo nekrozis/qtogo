@@ -67,6 +67,7 @@ const (
 	CodeExtractDecode = "extract.decode_failed"
 
 	CodeRelocateUnsupported = "relocate.unsupported_target"
+	CodeRelocateFailed      = "relocate.failed"
 
 	CodeConfigInvalid = "config.invalid"
 
