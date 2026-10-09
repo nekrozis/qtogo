@@ -10,10 +10,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/exitcode"
+	"github.com/nekrozis/qtogo/internal/safename"
 )
 
 // Downloaded is a verified archive on disk.
@@ -69,8 +69,8 @@ func (c *Client) Download(ctx context.Context, remote, destDir string) (Download
 // destination through filepath.Join on Windows — the reason this check is by
 // content and not by separator count.
 //
-// The rules are the extractor's (internal/extract/path.go), applied to the one name
-// this layer writes rather than to an archive entry.
+// The rules are internal/safename's, shared with the extractor and applied to the
+// one name this layer writes rather than to an archive entry.
 func archiveName(remote string) (string, error) {
 	name := path.Base(remote)
 	if reason := unsafeName(name); reason != "" {
@@ -82,51 +82,30 @@ func archiveName(remote string) (string, error) {
 
 // unsafeName says what makes a single name unsafe to write, or "" when it is
 // ordinary.
+//
+// The decision is internal/safename's, shared with the extractor; only the wording
+// is local, because a reader here is looking at a download, not an archive entry.
 func unsafeName(name string) string {
-	switch name {
-	case "":
+	switch safename.Check(name) {
+	case safename.OK:
+		return ""
+	case safename.Empty:
 		return "it is empty"
-	case ".", "..":
+	case safename.DotSegment:
 		return fmt.Sprintf("it is %q", name)
-	}
-	if strings.ContainsAny(name, `/\`) {
+	case safename.Separator:
 		return "it holds a path separator"
-	}
-	for _, r := range name {
-		if r < ' ' {
-			return "it holds a control character"
-		}
-	}
-	if strings.ContainsAny(name, `<>:"|?*`) {
+	case safename.Control:
+		return "it holds a control character"
+	case safename.IllegalChar:
 		return "it holds a character no file name may"
-	}
-	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+	case safename.TrailingDotOrSpace:
 		return "it ends in a dot or a space"
-	}
-	if windowsDevice(name) {
+	case safename.DeviceName:
 		return "Windows reads it as a device"
+	default:
+		return "it is not an ordinary file name"
 	}
-	return ""
-}
-
-// windowsDevice reports whether Windows would take the name for a device rather
-// than a file, sending the bytes somewhere other than the destination.
-func windowsDevice(name string) bool {
-	stem := name
-	if i := strings.IndexByte(name, '.'); i >= 0 {
-		stem = name[:i]
-	}
-	switch strings.ToUpper(stem) {
-	case "CON", "PRN", "AUX", "NUL":
-		return true
-	}
-	if len(stem) == 4 {
-		head, tail := strings.ToUpper(stem[:3]), stem[3]
-		if (head == "COM" || head == "LPT") && tail >= '1' && tail <= '9' {
-			return true
-		}
-	}
-	return false
 }
 
 // digestFor reads the expected digest from the official endpoint, never from the
