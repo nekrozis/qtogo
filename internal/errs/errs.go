@@ -37,6 +37,27 @@ const (
 	CodeVersionNotFound = "resolve.version_not_found"
 	CodePackageNotFound = "resolve.package_not_found"
 
+	// Transport: the scheme a source may use, the request itself, and the checks
+	// that a download is what it claims to be (ADR-007). The scheme refusals are
+	// usage errors, but their offending value is configuration rather than command
+	// syntax, which is why the phase they carry is config.
+	CodeInsecureScheme    = "usage.insecure_scheme"
+	CodeUnsupportedScheme = "usage.unsupported_scheme"
+
+	CodeRequestFailed    = "network.request_failed"
+	CodeHTTPStatus       = "network.status"
+	CodeHTTPNotFound     = "network.not_found"
+	CodeRedirectLimit    = "network.redirect_limit"
+	CodeSourcesExhausted = "network.sources_exhausted"
+	CodeDocumentTooLarge = "network.document_too_large"
+
+	CodeSchemeDowngrade   = "download.scheme_downgrade"
+	CodeFilesystem        = "download.filesystem"
+	CodeChecksumMissing   = "verify.checksum_missing"
+	CodeChecksumMalformed = "verify.checksum_malformed"
+	CodeChecksumWeak      = "verify.checksum_weak"
+	CodeDigestRedirected  = "verify.digest_source_redirected"
+
 	CodeChecksumMismatch = "verify.checksum_mismatch"
 	CodeUnsafeArchive    = "archive.unsafe_entry"
 
