@@ -207,6 +207,19 @@ func TestWriteArchiveAndChecksum(t *testing.T) {
 	}
 }
 
+// A failure part-way leaves no archive under the final name: that name means the
+// archive is whole.
+func TestWriteArchiveLeavesNothingBehindOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, archiveName("1.2.3"))
+	if err := writeArchive(path, []string{filepath.Join(dir, "does-not-exist")}); err == nil {
+		t.Fatal("writeArchive with a missing source = nil, want an error")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("an archive is at %s after a failed write", path)
+	}
+}
+
 // archiveEntries lists an archive's contents, in whichever format its name asks for.
 func archiveEntries(t *testing.T, path string) []string {
 	t.Helper()

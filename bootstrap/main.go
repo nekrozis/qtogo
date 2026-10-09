@@ -212,11 +212,19 @@ func archiveName(version string) string {
 
 // writeArchive puts the named files into one archive at path, flat, in whichever format
 // the name asks for.
+//
+// It writes under a temporary name and renames when the bytes are whole, so the
+// archive appears under its final name only once it is complete and a failure part-way
+// leaves nothing to mistake for one.
 func writeArchive(path string, files []string) error {
-	out, err := os.Create(path)
+	out, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-")
 	if err != nil {
 		return err
 	}
+	// Best effort: after a successful rename there is nothing at the temporary name,
+	// and after a failure the temporary file is not worth reporting over the failure.
+	defer func() { _ = os.Remove(out.Name()) }()
+
 	if strings.HasSuffix(path, ".zip") {
 		err = writeZip(out, files)
 	} else {
@@ -227,7 +235,10 @@ func writeArchive(path string, files []string) error {
 	if closeErr := out.Close(); err == nil {
 		err = closeErr
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return os.Rename(out.Name(), path)
 }
 
 func writeTarGz(out io.Writer, files []string) error {
