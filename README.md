@@ -27,6 +27,10 @@ The extractor is C, so the driver names the compiler cgo needs —
 [zig](https://ziglang.org/) on every platform — and always builds for the host. `-race`
 needs tsan, which zig does not provide, so it uses the host's own compiler.
 
+`go run` reports its own status, so a script that needs the driver's exit code — the one
+that tells a usage mistake from a failed step — should build the driver and run it
+directly.
+
 ## Using it
 
 ```sh
