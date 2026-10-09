@@ -140,7 +140,11 @@ func (r renderer) planInstallQt(ctx context.Context, inv invocation, svc Service
 		})
 	}
 	for _, a := range plan.Archives {
-		if _, err := fmt.Fprintf(r.out, "%s\t%s\n", a.URL, a.InstallPath); err != nil {
+		line := a.URL
+		if a.InstallPath != "" {
+			line += "\t" + a.InstallPath
+		}
+		if _, err := fmt.Fprintln(r.out, line); err != nil {
 			return err
 		}
 	}
@@ -172,8 +176,11 @@ func planRequest(inv invocation) (model.Host, model.Kind, model.Version, string,
 	return host, kind, version, inv.arg("arch"), modules(inv), nil
 }
 
-// modules collects --modules values in order, splitting each on commas so the
-// reference tool's "a,b" and this build's "--modules a --modules b" read the same.
+// modules collects --modules values in order, splitting each on commas so that
+// "--modules a,b" reads the same as "--modules a --modules b". The comma form is
+// this build's convenience; the reference tool takes a space-separated list after
+// one "-m/--modules" (and a bare "all" for every module, which this build does
+// not implement).
 func modules(inv invocation) []string {
 	var out []string
 	for _, value := range inv.values[optModules] {

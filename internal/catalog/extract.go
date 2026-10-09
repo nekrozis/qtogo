@@ -61,6 +61,6 @@ func extractArgs(pkg repository.PackageUpdate) []string {
 
 // notFound builds the failure for something the request asked for and the
 // repository does not have: a missing version, base package or module is exit 3.
-func notFound(format string, args ...any) error {
+func notFound(format string, args ...any) *errs.Error {
 	return errs.New(exitcode.NotFound, errs.CodePackageNotFound, errs.PhaseResolve, format, args...)
 }

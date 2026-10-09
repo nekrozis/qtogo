@@ -89,6 +89,8 @@ func TestPlanInstallQtCollectsModules(t *testing.T) {
 		{"equals", []string{"--modules=a"}, "a"},
 		{"comma-separated", []string{"--modules", "a,b"}, "a,b"},
 		{"mixed", []string{"--modules=a,b", "--modules", "c"}, "a,b,c"},
+		{"short alias", []string{"-m", "a"}, "a"},
+		{"short alias repeated", []string{"-m", "a", "--modules", "b"}, "a,b"},
 	}
 
 	for _, tt := range tests {
@@ -163,9 +165,29 @@ func TestHelpDescribesPlanInstallQt(t *testing.T) {
 	if code != exitcode.OK {
 		t.Fatalf("exit = %d, want %d", code, exitcode.OK)
 	}
-	for _, want := range []string{"plan install-qt <host> <target> <version> [<arch>]", "Arguments:", "[<arch>]", "--modules"} {
+	for _, want := range []string{"plan install-qt <host> <target> <version> [<arch>]", "Arguments:", "[<arch>]", "-m, --modules <module>"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help does not mention %q:\n%s", want, stdout)
 		}
+	}
+}
+
+// An archive that extracts at the root prints its URL alone, with no trailing tab.
+func TestPlanInstallQtTextHasNoTrailingTabAtTheRoot(t *testing.T) {
+	svc := &fakeServices{plan: catalog.Plan{
+		Version: "5.15.2",
+		Arch:    "gcc_64",
+		Archives: []catalog.Archive{
+			{Name: "qtbase.7z", URL: "https://example.invalid/qtbase.7z"},
+		},
+	}}
+
+	code, stdout, _ := runWith(svc, "plan", "install-qt", "linux", "desktop", "5.15.2", "gcc_64")
+
+	if code != exitcode.OK {
+		t.Fatalf("exit = %d, want %d", code, exitcode.OK)
+	}
+	if want := "https://example.invalid/qtbase.7z\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
 }

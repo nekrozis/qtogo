@@ -31,8 +31,8 @@ var optionTable = []optionSpec{
 	{id: optVersion, long: "version", summary: "Show the version"},
 	{id: optJSON, long: "json", summary: "Write machine-readable JSON instead of text"},
 	{
-		id: optModules, long: "modules", summary: "A module to include (repeatable)",
-		takesValue: true, value: "module",
+		id: optModules, long: "modules", aliases: []string{"m"},
+		summary: "A module to include (repeatable)", takesValue: true, value: "module",
 	},
 }
 

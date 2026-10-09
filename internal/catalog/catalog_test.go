@@ -207,6 +207,11 @@ func TestBuildRefusesAnAmbiguousArchitecture(t *testing.T) {
 	}
 	_, err := Build(packages, leaf, Request{Version: directoryVersion(t, "6.8.0", "680")})
 	assertFailure(t, err, exitcode.NotFound, errs.CodePackageNotFound)
+
+	// The failure tells the user what to do about it, not only what went wrong.
+	if errs.SuggestionOf(err) == "" {
+		t.Error("an ambiguous architecture carries no suggestion to name one")
+	}
 }
 
 func TestBuildRefusesAMissingBase(t *testing.T) {

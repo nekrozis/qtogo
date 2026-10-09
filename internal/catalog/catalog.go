@@ -151,9 +151,11 @@ func baseNames(req Request) []string {
 	}
 }
 
-// moduleNames are the spellings a module can take. Only the forms a captured
-// sample shows are built; a new one is added with evidence (ADR-003's rule),
-// which is why the Qt 6.8+ variants await a fixture before joining the list.
+// moduleNames are the spellings a module can take. The list is the reference
+// tool's minus the forms no captured sample shows: the Qt 6.8+ variants, and the
+// bare "qt.<token>.<module>.<arch>" basic-prefix form, which is why a module the
+// reference tool resolves could be refused here. A form joins the list with a
+// fixture (ADR-003's rule and ADR-010's consequence).
 func moduleNames(req Request, module string) []string {
 	token := req.Version.Raw
 	major := req.Version.Major
@@ -194,7 +196,8 @@ func resolveArch(packages []repository.PackageUpdate, req Request) (Request, err
 		}
 		return req, nil
 	default:
-		return Request{}, notFound("name the architecture with <arch>: %s offers more than one", req.Version.Dotted())
+		return Request{}, notFound("%s offers more than one architecture", req.Version.Dotted()).
+			WithSuggestion("name one as <arch>, e.g. win64_msvc2022_64")
 	}
 }
 
