@@ -259,9 +259,11 @@ const qtInstallLibs = "$$[QT_INSTALL_LIBS]"
 // forms are replaced first. Replacing the macOS path first would leave the drive
 // letter behind as "c:".
 //
-// The spellings are the ones a real .prl carries: lowercase "c:/" — an uppercase
-// "C:/" was searched for and never found — and the Windows form uses backslashes
-// after the drive, so both separators appear.
+// The spellings: the research records a lowercase "c:/" drive and the macOS form,
+// and says an uppercase "C:/" is never found, so there is none here. The
+// all-backslash form is not in any sample either — a real .prl mixes the two
+// separators — but a Windows path can be written that way, so it is covered; a
+// spelling that does not occur simply never matches.
 var buildLibDirs = []string{
 	`c:\Users\qt\work\install\lib`,
 	"c:/Users/qt/work/install/lib",
