@@ -137,24 +137,39 @@ func (s *Service) PlanInstallQt(ctx context.Context, host model.Host, kind model
 }
 
 // matchVersion finds the version directory a request names, comparing the numbers
-// so "6.8.0" matches the directory spelled "qt6_680". A request with a suffix
-// prefers a directory with the same suffix, then the release.
+// so "6.8.0" matches the directory spelled "qt6_680".
+//
+// A version can be spelled by more than one directory: the desktop one carries no
+// extension, while a sibling like "qt5_5152_wasm" or "qt5_5152_src_doc_examples"
+// decodes to the same numbers with an extension set. The plain directory is the
+// desktop one a request without a suffix means, so it wins over those; a request
+// that does carry a suffix matches the directory with that same suffix.
 func matchVersion(found []discovery.Version, want model.Version) (discovery.Version, error) {
-	var release *discovery.Version
+	var plain, suffixed *discovery.Version
 	for i := range found {
 		v := found[i].Directory.Version
 		if v.Major != want.Major || v.Minor != want.Minor || v.Patch != want.Patch {
 			continue
 		}
-		if v.Suffix == want.Suffix {
+		ext := found[i].Directory.Extension
+		switch {
+		case want.Suffix != "" && v.Suffix == want.Suffix && ext == want.Suffix:
 			return found[i], nil
-		}
-		if release == nil {
-			release = &found[i]
+		case ext == "" && v.Suffix == want.Suffix:
+			// The desktop directory for this release, and the request named no
+			// other spelling: this is the answer.
+			plain = &found[i]
+		case ext == "" && plain == nil:
+			plain = &found[i]
+		case ext != "" && suffixed == nil:
+			suffixed = &found[i]
 		}
 	}
-	if release != nil {
-		return *release, nil
+	switch {
+	case plain != nil:
+		return *plain, nil
+	case suffixed != nil:
+		return *suffixed, nil
 	}
 	return discovery.Version{}, errs.New(exitcode.NotFound, errs.CodeVersionNotFound, errs.PhaseResolve,
 		"the repository does not offer %s", want.Dotted())

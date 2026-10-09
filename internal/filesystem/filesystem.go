@@ -21,15 +21,6 @@ import (
 	"github.com/nekrozis/qtogo/internal/exitcode"
 )
 
-// Publish moves a staged tree to its destination.
-type Publish struct {
-	// Dest is the directory the tree is published as.
-	Dest string
-	// Overwrite removes an existing destination first. Without it a destination
-	// that is already there is a failure.
-	Overwrite bool
-}
-
 // Result is what publishing produced.
 type Result struct {
 	// Path is the published directory.
@@ -37,6 +28,49 @@ type Result struct {
 	// Replaced is whether an existing destination was removed first.
 	Replaced bool `json:"replaced,omitempty"`
 }
+
+// PublishTree moves a finished tree to dest inside an already-existing base
+// directory.
+//
+// Unlike Stage, the base directory may already be there — a user points at their
+// Qt directory — so only the tree itself is the unit that must be new, or be
+// replaced. dest's parent is created if it is not there, and an existing dest is
+// refused unless overwrite is set, since replacing a tree is the destructive
+// choice a caller has to ask for (ADR-011 decision 5).
+func PublishTree(tree, dest string, overwrite bool) (Result, error) {
+	abs, err := filepath.Abs(dest)
+	if err != nil {
+		return Result{}, failed("resolving the destination", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
+		return Result{}, failed("creating the destination's parent", err)
+	}
+
+	replaced := false
+	switch _, statErr := os.Lstat(abs); {
+	case statErr == nil && !overwrite:
+		return Result{}, exists(abs)
+	case statErr == nil:
+		if err := os.RemoveAll(abs); err != nil {
+			return Result{}, failed("removing the existing "+abs, err)
+		}
+		replaced = true
+	case !errors.Is(statErr, fs.ErrNotExist):
+		return Result{}, failed("reading the destination", statErr)
+	}
+
+	if err := os.Rename(tree, abs); err != nil {
+		return Result{}, failed("moving the tree into place", err)
+	}
+	return Result{Path: abs, Replaced: replaced}, nil
+}
+
+// Dir is a Tree that is a plain directory: the staging tree's own root, or a tree
+// found inside it, is what relocation runs on.
+type Dir string
+
+// Root returns the directory.
+func (d Dir) Root() string { return string(d) }
 
 // Stage is a working tree that becomes the destination or is discarded.
 //
@@ -76,41 +110,8 @@ func (s *Stage) Dir() string { return s.dir }
 // Root reads the staging directory's path, so a Stage is a relocate.Tree.
 func (s *Stage) Root() string { return s.dir }
 
-// Commit moves the staging directory to p.Dest.
-//
-// The rename is the one step that makes the tree visible, so everything before it
-// is invisible to a reader and everything after it has already happened. On
-// success the Stage is spent; on failure the staging directory is left for the
-// caller to discard.
-func (s *Stage) Commit(p Publish) (Result, error) {
-	dest, err := filepath.Abs(p.Dest)
-	if err != nil {
-		return Result{}, failed("resolving the destination", err)
-	}
-
-	replaced := false
-	switch _, statErr := os.Lstat(dest); {
-	case statErr == nil && !p.Overwrite:
-		return Result{}, exists(dest)
-	case statErr == nil:
-		if err := os.RemoveAll(dest); err != nil {
-			return Result{}, failed("removing the existing "+dest, err)
-		}
-		replaced = true
-	case !errors.Is(statErr, fs.ErrNotExist):
-		return Result{}, failed("reading the destination", statErr)
-	}
-
-	if err := os.Rename(s.dir, dest); err != nil {
-		return Result{}, failed("moving the staged tree into place", err)
-	}
-	s.dir = "" // spent: nothing left for Discard to remove
-	return Result{Path: dest, Replaced: replaced}, nil
-}
-
-// Discard removes the staging directory. It is safe after Commit, which leaves
-// nothing to remove, and is what a failure path calls so a partial tree never
-// survives.
+// Discard removes the staging directory. It is what a failure path calls so a
+// partial tree never survives.
 func (s *Stage) Discard() error {
 	if s.dir == "" {
 		return nil

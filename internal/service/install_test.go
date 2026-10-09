@@ -35,47 +35,46 @@ func sha256hex(body string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// treeArchive is the archived tree the fake repository serves.
+// treeArchive is the archived tree the fake repository serves: a minimal Qt 5
+// layout, whose archive carries <version>/<arch>/ itself and a bin/qmake marker.
 func treeArchive(t *testing.T) []byte {
 	t.Helper()
-	blob, err := os.ReadFile(filepath.Join("..", "..", "testdata", "archive", "tree.7z"))
+	blob, err := os.ReadFile(filepath.Join("..", "..", "testdata", "archive", "qtree.7z"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return blob
 }
 
-// installRepo wires a fake repository that serves one tree archive for a modern
-// desktop version, and a transport client that reads it.
-//
-// The archive is the existing testdata/tree.7z, whose entries land under the
-// version and architecture the metadata names, so an install of it has something
-// real to extract and relocate.
+// installRepo wires a fake repository that serves one tree archive for a Qt 5
+// desktop version. The archive has no Extract operation — as a real Qt 5 one does
+// not — so its contents land at the base directory and the tree is the
+// <version>/<arch>/ path inside it.
 func installRepo(t *testing.T) (*transport.Client, string) {
 	t.Helper()
 
 	blob := treeArchive(t)
-	const leaf = desktop + "/qt6_680"
-	const archivePath = leaf + "/qt.qt6.680.win64_msvc2022_64/6.8.0-0-202410030750tree.7z"
+	const leaf = desktop + "/qt5_5152"
+	const archivePath = leaf + "/qt.qt5.5152.win64_mingw81/5.15.2-0-202011130601qtree.7z"
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+desktop+"/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/Updates.xml") {
-			io.WriteString(w, updatesFor("qt.qt6.680.win64_msvc2022_64", "6.8.0-0-202410030750", "tree.7z"))
+			io.WriteString(w, updatesNoExtract("qt.qt5.5152.win64_mingw81", "5.15.2-0-202011130601", "qtree.7z"))
 			return
 		}
-		io.WriteString(w, targetIndexAt(desktop, "qt6_680"))
+		io.WriteString(w, targetIndexAt(desktop, "qt5_5152"))
 	})
 	mux.HandleFunc("/"+leaf+"/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/Updates.xml") {
-			io.WriteString(w, updatesFor("qt.qt6.680.win64_msvc2022_64", "6.8.0-0-202410030750", "tree.7z"))
+			io.WriteString(w, updatesNoExtract("qt.qt5.5152.win64_mingw81", "5.15.2-0-202011130601", "qtree.7z"))
 			return
 		}
 		io.WriteString(w, leafIndex(leaf, "Updates.xml"))
 	})
 	mux.HandleFunc("/"+archivePath, func(w http.ResponseWriter, _ *http.Request) { w.Write(blob) })
 	mux.HandleFunc("/"+archivePath+".sha256", func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, sha256hex(string(blob))+"  tree.7z\n")
+		io.WriteString(w, sha256hex(string(blob))+"  qtree.7z\n")
 	})
 
 	srv := httptest.NewTLSServer(mux)
@@ -99,6 +98,15 @@ func updatesFor(name, version, archive string) string {
 		`</Operation></Operations></PackageUpdate></Updates>`
 }
 
+// updatesNoExtract is a Qt 5 package: downloads with no Extract operation, so
+// their contents land at the base directory.
+func updatesNoExtract(name, version, archive string) string {
+	return `<Updates><PackageUpdate><Name>` + name + `</Name>` +
+		`<Version>` + version + `</Version>` +
+		`<DownloadableArchives>` + archive + `</DownloadableArchives>` +
+		`</PackageUpdate></Updates>`
+}
+
 func targetIndexAt(dir, child string) string {
 	return `<html><head><title>Index of /` + dir + `</title></head><body>` +
 		`<h1>Index of /` + dir + `</h1>` +
@@ -111,16 +119,21 @@ func leafIndex(leaf, updates string) string {
 		`<a href="` + updates + `">` + updates + `</a></body></html>`
 }
 
-// installRequest is the request most of these tests make: a modern desktop
-// version, which relocation covers.
+// installRequest is the request most of these tests make: a Qt 5 desktop version,
+// which relocation covers and whose archive nests its own version/arch path.
 func installRequest(t *testing.T) (model.Host, model.Kind, model.Version) {
 	t.Helper()
-	v, err := model.ParseVersion("6.8.0")
+	v, err := model.ParseVersion("5.15.2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return model.HostWindows, model.KindDesktop, v
 }
+
+// installTree is the tree path a request installs into: the arch directory is Qt's
+// own name, which the archive carries.
+const installArch = "win64_mingw81"
+const treeRel = "5.15.2/mingw81_64"
 
 func TestInstallQtWritesATreeAndAManifest(t *testing.T) {
 	client, _ := installRepo(t)
@@ -128,37 +141,43 @@ func TestInstallQtWritesATreeAndAManifest(t *testing.T) {
 	s := New(client).WithDownloader(client)
 	host, kind, version := installRequest(t)
 
-	got, err := s.InstallQt(context.Background(), host, kind, version, "win64_msvc2022_64", nil,
+	got, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
 		InstallOptions{OutputDir: out})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// The tree landed under <version>/<arch> and the files came out of the archive.
-	root := filepath.Join(out, "6.8.0", "win64_msvc2022_64")
+	// --outputdir is the base directory; the tree is the path its archive carries.
+	root := filepath.Join(out, filepath.FromSlash(treeRel))
 	if got.Path != root {
 		t.Errorf("path = %q, want %q", got.Path, root)
 	}
 	if got.Policy != "modern-desktop" || !got.Relocatable {
 		t.Errorf("policy = %q, relocatable = %t", got.Policy, got.Relocatable)
 	}
-	// The archive's contents landed where its Extract operation said — under
-	// <tree>/6.8.0/msvc2022_64/ — and relocation wrote bin/qt.conf beside them.
-	for _, rel := range []string{"6.8.0/msvc2022_64/dir/file.txt", "6.8.0/msvc2022_64/empty.txt"} {
+
+	// The archive's contents are in the tree, and relocation corrected and marked it.
+	for _, rel := range []string{"bin/qmake.exe", "bin/qt.conf"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
-			t.Errorf("the archive's %s is not in the tree: %v", rel, err)
+			t.Errorf("the tree has no %s: %v", rel, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "bin", "qt.conf")); err != nil {
-		t.Errorf("relocation did not write bin/qt.conf: %v", err)
+	// The prl was written by the fixture with a build prefix, and relocation
+	// replaced it — proof the policy ran on the tree, not the base directory.
+	prl, err := os.ReadFile(filepath.Join(root, "lib", "libQt5Core.prl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prl), "$$[QT_INSTALL_LIBS]") {
+		t.Errorf("the prl was not relocated:\n%s", prl)
 	}
 
-	// The manifest is there and names the archive and its digest.
+	// The manifest is in the tree and names the archive and its digest.
 	body, err := os.ReadFile(filepath.Join(root, "qtogo-manifest.json"))
 	if err != nil {
 		t.Fatalf("no manifest: %v", err)
 	}
-	for _, want := range []string{`"program"`, `"modern-desktop"`, `"tree.7z"`, `"digest"`} {
+	for _, want := range []string{`"program"`, `"modern-desktop"`, `"qtree.7z"`, `"digest"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("manifest is missing %q:\n%s", want, body)
 		}
@@ -173,7 +192,7 @@ func TestInstallManifestHasNoAbsolutePath(t *testing.T) {
 	s := New(client).WithDownloader(client)
 	host, kind, version := installRequest(t)
 
-	got, err := s.InstallQt(context.Background(), host, kind, version, "win64_msvc2022_64", nil,
+	got, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
 		InstallOptions{OutputDir: out})
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +216,7 @@ func TestInstallQtDryRunTouchesNothing(t *testing.T) {
 	s := New(client).WithDownloader(client)
 	host, kind, version := installRequest(t)
 
-	got, err := s.InstallQt(context.Background(), host, kind, version, "win64_msvc2022_64", nil,
+	got, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
 		InstallOptions{OutputDir: out, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
@@ -219,19 +238,19 @@ func TestInstallQtDryRunTouchesNothing(t *testing.T) {
 func TestInstallQtRefusesAnExistingDestination(t *testing.T) {
 	client, _ := installRepo(t)
 	out := t.TempDir()
-	root := filepath.Join(out, "6.8.0", "win64_msvc2022_64")
+	root := filepath.Join(out, filepath.FromSlash(treeRel))
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	s := New(client).WithDownloader(client)
 	host, kind, version := installRequest(t)
 
-	_, err := s.InstallQt(context.Background(), host, kind, version, "win64_msvc2022_64", nil,
+	_, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
 		InstallOptions{OutputDir: out})
 	assertFailure(t, err, exitcode.Filesystem, errs.CodeFilesystem)
 
 	// No staging directory was left beside the destination.
-	entries, err := os.ReadDir(filepath.Join(out, "6.8.0"))
+	entries, err := os.ReadDir(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +264,7 @@ func TestInstallQtRefusesAnExistingDestination(t *testing.T) {
 func TestInstallQtOverwritesWhenAsked(t *testing.T) {
 	client, _ := installRepo(t)
 	out := t.TempDir()
-	root := filepath.Join(out, "6.8.0", "win64_msvc2022_64")
+	root := filepath.Join(out, filepath.FromSlash(treeRel))
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +274,7 @@ func TestInstallQtOverwritesWhenAsked(t *testing.T) {
 	s := New(client).WithDownloader(client)
 	host, kind, version := installRequest(t)
 
-	got, err := s.InstallQt(context.Background(), host, kind, version, "win64_msvc2022_64", nil,
+	got, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
 		InstallOptions{OutputDir: out, Overwrite: true})
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +291,7 @@ func TestInstallQtOverwritesWhenAsked(t *testing.T) {
 // the fake repository counts the archive requests it serves.
 func TestInstallQtChecksRelocationBeforeDownloading(t *testing.T) {
 	var archiveHits int
-	blob, err := os.ReadFile(filepath.Join("..", "..", "testdata", "archive", "tree.7z"))
+	blob, err := os.ReadFile(filepath.Join("..", "..", "testdata", "archive", "qtree.7z"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,14 +299,14 @@ func TestInstallQtChecksRelocationBeforeDownloading(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+desktop+"/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/Updates.xml") {
-			io.WriteString(w, updatesFor("qt.qt5.590.win64_msvc2019_64", "5.9.0-0-20180101", "tree.7z"))
+			io.WriteString(w, updatesFor("qt.qt5.590.win64_msvc2019_64", "5.9.0-0-20180101", "qtree.7z"))
 			return
 		}
 		io.WriteString(w, targetIndexAt(desktop, "qt5_590"))
 	})
 	mux.HandleFunc("/"+leaf+"/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/Updates.xml") {
-			io.WriteString(w, updatesFor("qt.qt5.590.win64_msvc2019_64", "5.9.0-0-20180101", "tree.7z"))
+			io.WriteString(w, updatesFor("qt.qt5.590.win64_msvc2019_64", "5.9.0-0-20180101", "qtree.7z"))
 			return
 		}
 		io.WriteString(w, leafIndex(leaf, "Updates.xml"))
@@ -332,7 +351,7 @@ func TestInstallQtCancellationLeavesNothing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := s.InstallQt(ctx, host, kind, version, "win64_msvc2022_64", nil, InstallOptions{OutputDir: out})
+	_, err := s.InstallQt(ctx, host, kind, version, installArch, nil, InstallOptions{OutputDir: out})
 	if err == nil {
 		t.Fatal("a cancelled install reported success")
 	}

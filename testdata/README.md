@@ -32,6 +32,10 @@ written for the purpose:
 - `solid.7z` — three files sharing one compressed stream (the default settings),
   which is the shape Qt's own archives have.
 - `tree.7z` — a directory entry and an empty file, so both are covered.
+- `qtree.7z` — a minimal Qt 5 tree: `<version>/<arch>/bin/qmake.exe` (the marker an
+  installed tree is found by), a `lib/*.prl` carrying a build prefix, and a
+  `mkspecs/qconfig.pri` with the edition lines. It lets an install test run the
+  whole chain — extract, locate the tree, relocate — without a real 88 MB download.
 - `backslash.7z` — built like `plain.7z`, then rewritten in place so its separators
   are `\`: `sub\nested\f.txt`, and a `..\escape.txt` that tries to leave the
   destination.

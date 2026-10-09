@@ -85,8 +85,20 @@ func (s *Service) InstallQt(ctx context.Context, host model.Host, kind model.Kin
 		return Installed{Plan: plan}, nil
 	}
 
-	dest := filepath.Join(opts.OutputDir, treeName(plan))
-	stage, err := filesystem.NewStage(dest)
+	// --outputdir is the base directory and may already exist — a user points at
+	// their Qt directory. The tree lives inside it at the path the archives carry,
+	// so it is the tree, not the base, that must be new or explicitly replaced.
+	base := opts.OutputDir
+	if base == "" {
+		base, err = os.Getwd()
+		if err != nil {
+			return Installed{}, fsFailed("reading the working directory", err)
+		}
+	}
+	if err := os.MkdirAll(base, 0o750); err != nil {
+		return Installed{}, fsFailed("creating "+base, err)
+	}
+	stage, err := filesystem.NewStage(filepath.Join(base, ".staging"))
 	if err != nil {
 		return Installed{}, err
 	}
@@ -110,7 +122,19 @@ func (s *Service) InstallQt(ctx context.Context, host model.Host, kind model.Kin
 	if err := ctx.Err(); err != nil {
 		return Installed{}, cancelledInstall(err)
 	}
-	report, err := s.relocator.Relocate(ctx, stage, target)
+
+	// The tree is inside the staging directory, at the version/arch path the
+	// archives established; it is corrected and given its manifest there, before
+	// anything is published.
+	tree, err := findTree(stage.Dir())
+	if err != nil {
+		return Installed{}, err
+	}
+	treeRel, err := filepath.Rel(stage.Dir(), tree)
+	if err != nil {
+		return Installed{}, fsFailed("locating the tree", err)
+	}
+	report, err := s.relocator.Relocate(ctx, filesystem.Dir(tree), target)
 	if err != nil {
 		return Installed{}, err
 	}
@@ -119,20 +143,26 @@ func (s *Service) InstallQt(ctx context.Context, host model.Host, kind model.Kin
 	if err != nil {
 		return Installed{}, err
 	}
-	result, err := stage.Commit(filesystem.Publish{Dest: dest, Overwrite: opts.Overwrite})
-	if err != nil {
+	if err := filesystem.WriteManifest(tree, manifest); err != nil {
 		return Installed{}, err
 	}
-	if err := filesystem.WriteManifest(result.Path, manifest); err != nil {
+
+	// Only the tree is published, and it lands at the same relative path inside the
+	// base directory; the staging directory around it is discarded. The tree is
+	// the unit the reference tool refuses to overwrite, and the one --overwrite
+	// replaces.
+	dest := filepath.Join(base, treeRel)
+	published, err := filesystem.PublishTree(tree, dest, opts.Overwrite)
+	if err != nil {
 		return Installed{}, err
 	}
 
 	return Installed{
 		Plan:        plan,
-		Path:        result.Path,
+		Path:        published.Path,
 		Policy:      report.Policy,
 		Relocatable: report.Relocatable,
-		Replaced:    result.Replaced,
+		Replaced:    published.Replaced,
 	}, nil
 }
 
@@ -229,13 +259,24 @@ func (s *Service) fetchAndExtract(ctx context.Context, plan catalog.Plan, work, 
 	return records, nil
 }
 
-// extractArchive opens one archive and writes it into dest, creating dest if it is
-// not there. The caller owns root, so a name that would leave it is refused by the
-// extractor rather than here.
+// extractArchive opens one archive and merges its contents into dest.
+//
+// The extractor insists on an empty destination — that is what makes a name it
+// refuses unable to reach anything already there (ADR-005). But archives share a
+// destination: a package records one archive per file group, and a Qt 5 package
+// with no Extract operation puts every one of them at the tree root. So each
+// archive is extracted into a directory of its own and its entries are then moved
+// into place, rather than handing the shared destination to the extractor.
 func extractArchive(ctx context.Context, path, dest string, limits extract.Limits) error {
 	if err := os.MkdirAll(dest, 0o750); err != nil {
 		return fsFailed("creating "+dest, err)
 	}
+	staging, err := os.MkdirTemp("", "qtogo-extract-")
+	if err != nil {
+		return fsFailed("creating an extraction directory", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+
 	a, err := sevenzip.Open(path, limits.MaxBlock)
 	if err != nil {
 		return errs.Wrap(exitcode.Integrity, errs.CodeExtractFailed, errs.PhaseExtract, err,
@@ -243,10 +284,67 @@ func extractArchive(ctx context.Context, path, dest string, limits extract.Limit
 	}
 	defer func() { _ = a.Close() }()
 
-	if _, err := extract.All(ctx, a, dest, limits); err != nil {
+	if _, err := extract.All(ctx, a, staging, limits); err != nil {
 		return err
 	}
+	return mergeTrees(staging, dest)
+}
+
+// mergeTrees moves everything under from into dest, keeping whatever is already
+// there.
+//
+// A name that is already present in dest is the archive naming a file twice, or
+// two archives claiming the same path; either way the later one is refused rather
+// than silently overwriting, which is the same "an entry never lands on another"
+// rule the extractor applies within one archive.
+func mergeTrees(from, dest string) error {
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return fsFailed("reading the extracted tree", err)
+	}
+	for _, e := range entries {
+		src := filepath.Join(from, e.Name())
+		dst := filepath.Join(dest, e.Name())
+		if err := mergeEntry(src, dst); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// mergeEntry moves one top-level entry, descending into directories so a merge
+// into a directory already holding files from another archive works.
+func mergeEntry(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return fsFailed("reading "+src, err)
+	}
+	if !info.IsDir() {
+		if _, err := os.Lstat(dst); err == nil {
+			return refused("the archive names %s, which an earlier archive already put there", dst)
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return fsFailed("moving "+src+" into place", err)
+		}
+		return nil
+	}
+
+	if existing, err := os.Lstat(dst); err == nil && !existing.IsDir() {
+		return refused("%s is a file, and the archive has a directory there", dst)
+	}
+	if err := os.MkdirAll(dst, 0o750); err != nil {
+		return fsFailed("creating "+dst, err)
+	}
+	children, err := os.ReadDir(src)
+	if err != nil {
+		return fsFailed("reading "+src, err)
+	}
+	for _, child := range children {
+		if err := mergeEntry(filepath.Join(src, child.Name()), filepath.Join(dst, child.Name())); err != nil {
+			return err
+		}
+	}
+	return os.Remove(src)
 }
 
 // marshalManifest builds the document an installed tree carries. Every path in it
@@ -282,16 +380,67 @@ func marshalManifest(plan catalog.Plan, target model.Target,
 	return append(body, '\n'), nil
 }
 
-// treeName is the directory a plan publishes into: <version>/<arch>, the layout a
-// Qt tree expects and the reference tool writes.
-func treeName(plan catalog.Plan) string {
-	return filepath.Join(plan.Version, plan.Arch)
+// findTree locates the Qt tree under the staging directory.
+//
+// The destination of an install is the tree itself, wherever the archives put it:
+// a Qt 5 archive nests <version>/<arch>/ inside itself, while a Qt 6 archive's
+// Extract operation names that path. So the tree is found rather than assumed, by
+// looking for the marker every Qt tree carries — qmake in bin — with a bounded
+// walk from the root.
+func findTree(root string) (string, error) {
+	found, err := walkForQmake(root, 0)
+	if err != nil {
+		return "", err
+	}
+	if found != "" {
+		return found, nil
+	}
+	return "", errs.New(exitcode.Filesystem, errs.CodeExtractFailed, errs.PhaseExtract,
+		"no Qt tree was found under %s: the archives did not carry a bin/qmake", root)
+}
+
+// treeDepth bounds the search: version and architecture are at most two levels
+// below the base directory.
+const treeDepth = 3
+
+// walkForQmake descends from dir looking for a directory holding bin/qmake.
+func walkForQmake(dir string, depth int) (string, error) {
+	for _, exe := range []string{"qmake", "qmake.exe"} {
+		if info, err := os.Stat(filepath.Join(dir, "bin", exe)); err == nil && !info.IsDir() {
+			return dir, nil
+		}
+	}
+	if depth >= treeDepth {
+		return "", nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fsFailed("reading "+dir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		found, err := walkForQmake(filepath.Join(dir, e.Name()), depth+1)
+		if err != nil {
+			return "", err
+		}
+		if found != "" {
+			return found, nil
+		}
+	}
+	return "", nil
 }
 
 // fsFailed reports a filesystem failure during an install.
 func fsFailed(action string, cause error) error {
 	return errs.Wrap(exitcode.Filesystem, errs.CodeFilesystem, errs.PhasePublish, cause,
 		"%s: %v", action, cause)
+}
+
+// refused reports an archive whose entries collide with what is already extracted.
+func refused(format string, args ...any) error {
+	return errs.New(exitcode.Integrity, errs.CodeUnsafeArchive, errs.PhaseExtract, format, args...)
 }
 
 // cancelledInstall reports a context that ended during an install.

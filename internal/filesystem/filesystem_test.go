@@ -21,25 +21,24 @@ func assertFailure(t *testing.T, err error, wantExit int, wantCode string) {
 	}
 }
 
-// stage is the destination's directory, with a staging tree holding a marker file.
-func staged(t *testing.T, dest string) *Stage {
+// tree makes a directory holding a marker file, standing in for a finished tree.
+func tree(t *testing.T, dir string) string {
 	t.Helper()
-	s, err := NewStage(dest)
-	if err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(s.Dir(), "marker"), []byte("tree"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "marker"), []byte("tree"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return dir
 }
 
-func TestCommitMovesTheTreeIntoPlace(t *testing.T) {
+func TestPublishTreeMovesTheTreeIntoPlace(t *testing.T) {
 	base := t.TempDir()
-	dest := filepath.Join(base, "Qt")
-	s := staged(t, dest)
+	src := tree(t, filepath.Join(base, ".staging", "5.15.2", "mingw81_64"))
+	dest := filepath.Join(base, "5.15.2", "mingw81_64")
 
-	result, err := s.Commit(Publish{Dest: dest})
+	result, err := PublishTree(src, dest, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,103 +48,93 @@ func TestCommitMovesTheTreeIntoPlace(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dest, "marker")); err != nil {
 		t.Errorf("the tree was not published: %v", err)
 	}
-	// The staging directory is gone: nothing left beside the destination.
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 {
-		t.Errorf("base holds %d entries, want only the published tree", len(entries))
+}
+
+// The base directory may already exist — a user points at their Qt directory — so
+// only the tree itself must be new.
+func TestPublishTreeAcceptsAnExistingBase(t *testing.T) {
+	base := t.TempDir()
+	src := tree(t, filepath.Join(base, ".staging", "6.8.0", "msvc2022_64"))
+
+	if _, err := PublishTree(src, filepath.Join(base, "6.8.0", "msvc2022_64"), false); err != nil {
+		t.Fatalf("publishing into an existing base directory = %v", err)
 	}
 }
 
-// The destination appears only once the tree is complete: a failure before Commit
-// leaves nothing behind after Discard.
-func TestDiscardLeavesNoDestination(t *testing.T) {
+func TestPublishTreeRefusesAnExistingTree(t *testing.T) {
 	base := t.TempDir()
-	dest := filepath.Join(base, "Qt")
-	s := staged(t, dest)
+	dest := tree(t, filepath.Join(base, "5.15.2", "mingw81_64"))
+	src := tree(t, filepath.Join(base, ".staging"))
 
-	if err := s.Discard(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the destination exists after Discard")
-	}
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Errorf("the staging directory survived Discard: %v", entries)
-	}
-}
-
-func TestCommitRefusesAnExistingDestination(t *testing.T) {
-	base := t.TempDir()
-	dest := filepath.Join(base, "Qt")
-	if err := os.MkdirAll(dest, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	s := staged(t, dest)
-
-	_, err := s.Commit(Publish{Dest: dest})
+	_, err := PublishTree(src, dest, false)
 	assertFailure(t, err, exitcode.Filesystem, errs.CodeFilesystem)
 
-	// The refusal leaves the existing destination where it was.
-	if _, err := os.Stat(dest); err != nil {
-		t.Errorf("the existing destination was disturbed: %v", err)
+	// The refusal leaves the existing tree where it was.
+	if _, err := os.Stat(filepath.Join(dest, "marker")); err != nil {
+		t.Errorf("the existing tree was disturbed: %v", err)
 	}
 }
 
-func TestCommitOverwritesWhenAsked(t *testing.T) {
+func TestPublishTreeOverwritesWhenAsked(t *testing.T) {
 	base := t.TempDir()
-	dest := filepath.Join(base, "Qt")
-	if err := os.MkdirAll(dest, 0o750); err != nil {
-		t.Fatal(err)
-	}
+	dest := tree(t, filepath.Join(base, "5.15.2", "mingw81_64"))
 	if err := os.WriteFile(filepath.Join(dest, "old"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := staged(t, dest)
+	src := tree(t, filepath.Join(base, ".staging"))
 
-	result, err := s.Commit(Publish{Dest: dest, Overwrite: true})
+	result, err := PublishTree(src, dest, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.Replaced {
-		t.Error("result does not say the destination was replaced")
+		t.Error("result does not say the tree was replaced")
 	}
 	if _, err := os.Stat(filepath.Join(dest, "old")); !errors.Is(err, os.ErrNotExist) {
-		t.Error("the old destination's contents survived the overwrite")
+		t.Error("the old tree's contents survived the overwrite")
 	}
 	if _, err := os.Stat(filepath.Join(dest, "marker")); err != nil {
 		t.Errorf("the new tree is not in place: %v", err)
 	}
 }
 
-// A staging directory is created beside the destination, so the rename never
-// crosses a volume boundary.
-func TestStageIsBesideTheDestination(t *testing.T) {
+// A staging directory is created under a base directory, hidden and unique.
+func TestNewStageIsHiddenUnderTheBase(t *testing.T) {
 	base := t.TempDir()
-	dest := filepath.Join(base, "Qt")
-	s := staged(t, dest)
-
-	if got := filepath.Dir(s.Dir()); got != base {
-		t.Errorf("staging directory is under %q, want %q", got, base)
-	}
-	if err := s.Discard(); err != nil {
+	s, err := NewStage(filepath.Join(base, ".staging"))
+	if err != nil {
 		t.Fatal(err)
+	}
+	defer func() { _ = s.Discard() }()
+
+	if filepath.Dir(s.Dir()) != base {
+		t.Errorf("staging directory is under %q, want %q", filepath.Dir(s.Dir()), base)
+	}
+	if name := filepath.Base(s.Dir()); name[0] != '.' {
+		t.Errorf("staging directory %q is not hidden", name)
 	}
 }
 
-// A destination whose parent does not exist has it created: an install into a
-// fresh output directory is the ordinary case.
+// Discard removes the staging directory and everything in it.
+func TestDiscardRemovesTheStagingTree(t *testing.T) {
+	base := t.TempDir()
+	s, err := NewStage(filepath.Join(base, ".staging"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree(t, filepath.Join(s.Dir(), "5.15.2", "mingw81_64"))
+
+	if err := s.Discard(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.Dir()); !errors.Is(err, os.ErrNotExist) {
+		t.Error("the staging directory survived Discard")
+	}
+}
+
 func TestNewStageCreatesTheParent(t *testing.T) {
 	base := t.TempDir()
-	dest := filepath.Join(base, "fresh", "Qt")
-
-	s, err := NewStage(dest)
+	s, err := NewStage(filepath.Join(base, "fresh", "staging"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,27 +142,6 @@ func TestNewStageCreatesTheParent(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(base, "fresh")); err != nil {
 		t.Errorf("the parent was not created: %v", err)
-	}
-	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
-		t.Error("the destination itself was created, but only the staging tree should be")
-	}
-}
-
-// Discard after Commit is a no-op rather than an error: a failure path that runs
-// both should not have to know which happened.
-func TestDiscardAfterCommitIsQuiet(t *testing.T) {
-	base := t.TempDir()
-	dest := filepath.Join(base, "Qt")
-	s := staged(t, dest)
-
-	if _, err := s.Commit(Publish{Dest: dest}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Discard(); err != nil {
-		t.Errorf("Discard after Commit = %v, want nil", err)
-	}
-	if _, err := os.Stat(filepath.Join(dest, "marker")); err != nil {
-		t.Errorf("Discard after Commit removed the published tree: %v", err)
 	}
 }
 
