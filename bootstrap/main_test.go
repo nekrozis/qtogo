@@ -107,6 +107,7 @@ func TestBuildEnvRaceLeavesTheCompilerAlone(t *testing.T) {
 // the shell is replaced rather than passed along.
 func TestBuildEnvNamesTheCompilerForThisHost(t *testing.T) {
 	t.Setenv("CC", "some-other-cc")
+	stubLookPath(t, nil)
 
 	want, err := cCompiler(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -124,6 +125,30 @@ func TestBuildEnvNamesTheCompilerForThisHost(t *testing.T) {
 			t.Error("the inherited CC is still in the environment")
 		}
 	}
+}
+
+// A missing compiler is reported as a missing tool, naming it, rather than as a
+// compiler error somewhere inside the build.
+func TestBuildEnvReportsAMissingCompiler(t *testing.T) {
+	stubLookPath(t, errors.New("executable file not found"))
+
+	if _, err := buildEnv(false); err == nil {
+		t.Fatal("buildEnv = nil, want an error when the compiler is not installed")
+	}
+}
+
+// stubLookPath makes a build see the compiler as installed (err nil) or not, without
+// the compiler having to be on the machine running the tests.
+func stubLookPath(t *testing.T, err error) {
+	t.Helper()
+	original := lookPath
+	lookPath = func(string) (string, error) {
+		if err != nil {
+			return "", err
+		}
+		return "/a/compiler", nil
+	}
+	t.Cleanup(func() { lookPath = original })
 }
 
 func TestBinPathIsUnderBin(t *testing.T) {

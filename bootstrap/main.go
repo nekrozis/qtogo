@@ -375,6 +375,10 @@ func runLint(ctx context.Context, env []string) error {
 	return nil
 }
 
+// lookPath is exec.LookPath, indirected so a test can say whether the compiler is
+// installed without the compiler being installed.
+var lookPath = exec.LookPath
+
 // buildEnv is the environment a build or test runs with: the caller's, with cgo turned
 // on and the C compiler named.
 // The platform rules live in cCompiler, which takes the host as an argument and can be
@@ -390,6 +394,13 @@ func buildEnv(race bool) ([]string, error) {
 	cc, err := cCompiler(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return nil, err
+	}
+	// Say the compiler is absent here, before the build starts: cgo would otherwise
+	// fail somewhere inside itself, and "the tool the driver needs is not installed" is
+	// what the reader actually has to act on.
+	program := strings.Fields(cc)[0]
+	if _, err := lookPath(program); err != nil {
+		return nil, fmt.Errorf("%s is not on PATH, and cgo needs it to build the archive extractor: %w", program, err)
 	}
 	return append(without(env, "CC"), "CC="+cc), nil
 }
