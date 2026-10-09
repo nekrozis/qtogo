@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"crypto/sha1" //nolint:gosec // G505: a test of the weak-checksum path, which is opt-in
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -20,6 +21,11 @@ import (
 
 func sha256hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func sha1hex(s string) string {
+	sum := sha1.Sum([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -328,5 +334,112 @@ func TestDownloadSwitchesSourceOnAMismatch(t *testing.T) {
 	}
 	if corrupt.count() != 1 {
 		t.Errorf("the corrupt source was tried %d times, want exactly once (no retry of a mismatched URL)", corrupt.count())
+	}
+}
+
+// TestArchiveNameRefusesUnsafeNames pins the rule that keeps a repository path
+// from naming a file outside the destination. A '\' is the one path.Base leaves
+// behind, so it is the important case.
+func TestArchiveNameRefusesUnsafeNames(t *testing.T) {
+	bad := []string{
+		`qt/..\evil.7z`, `qt/a\b.7z`, "qt/CON", "qt/con.7z", "qt/LPT1", "qt/x.",
+		"qt/x ", "qt/a:b.7z", "qt/a\x01b.7z", "qt/..", "qt/.",
+	}
+	for _, remote := range bad {
+		if name, err := archiveName(remote); err == nil {
+			t.Errorf("archiveName(%q) = %q, want a refusal", remote, name)
+		}
+	}
+	good := map[string]string{
+		"qt/x.7z":                   "x.7z",
+		"qt/base-Windows-X86_64.7z": "base-Windows-X86_64.7z",
+	}
+	for remote, want := range good {
+		got, err := archiveName(remote)
+		if err != nil || got != want {
+			t.Errorf("archiveName(%q) = %q, %v; want %q", remote, got, err, want)
+		}
+	}
+}
+
+func TestDownloadRefusesAPathThatWouldEscape(t *testing.T) {
+	official := fileServer(t, map[string]string{}, nil)
+	source := fileServer(t, map[string]string{}, nil)
+	c, err := newClient(Config{Sources: []string{source.URL}, Official: official.URL}, trustAll(official, source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	_, err = c.Download(context.Background(), `qt/..\evil.7z`, dir)
+	assertFailure(t, err, exitcode.Usage, errs.CodeUnexpectedValue)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "evil.7z")); !os.IsNotExist(err) {
+		t.Error("a file was written outside the destination")
+	}
+}
+
+func TestDownloadDoesNotFollowATrustedBaseDigestRedirect(t *testing.T) {
+	const body = "bytes"
+	reached := &hits{}
+	elsewhere := fileServer(t, map[string]string{"/qt/x.7z.sha256": sha256hex(body)}, reached)
+	official := fileServer(t, map[string]string{}, nil) // the official endpoint cannot answer
+	base := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sha256") {
+			http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusFound)
+			return
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(base.Close)
+
+	c, err := newClient(
+		Config{Sources: []string{base.URL}, Official: official.URL, TrustBaseChecksum: true},
+		trustAll(official, base, elsewhere))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Download(context.Background(), "qt/x.7z", t.TempDir())
+	assertFailure(t, err, exitcode.Integrity, errs.CodeDigestRedirected)
+	if reached.count() != 0 {
+		t.Errorf("the redirect target was contacted %d times for a checksum", reached.count())
+	}
+}
+
+func TestDownloadReportsAWriteFailure(t *testing.T) {
+	const body = "bytes"
+	official := fileServer(t, map[string]string{"/qt/x.7z.sha256": sha256hex(body)}, nil)
+	source := fileServer(t, map[string]string{"/qt/x.7z": body}, nil)
+	c, err := newClient(Config{Sources: []string{source.URL}, Official: official.URL}, trustAll(official, source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The destination is an ordinary file, so the directory cannot be made.
+	blocked := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocked, []byte("in the way"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Download(context.Background(), "qt/x.7z", blocked)
+	assertFailure(t, err, exitcode.Filesystem, errs.CodeFilesystem)
+}
+
+func TestDownloadWithAWeakAlgorithm(t *testing.T) {
+	const body = "bytes"
+	sum := sha1hex(body)
+	// An archive's .sha1 sidecar is bare hex, with no file name, so this also pins
+	// the format the weak path reads.
+	official := fileServer(t, map[string]string{"/qt/x.7z.sha1": sum}, nil)
+	source := fileServer(t, map[string]string{"/qt/x.7z": body}, nil)
+
+	c, err := newClient(
+		Config{Sources: []string{source.URL}, Official: official.URL, Algorithm: "sha1", AllowWeakChecksum: true},
+		trustAll(official, source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.Download(context.Background(), "qt/x.7z", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Digest != sum {
+		t.Errorf("digest = %q, want %q", got.Digest, sum)
 	}
 }

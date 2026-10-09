@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/exitcode"
@@ -57,21 +59,84 @@ func (c *Client) Download(ctx context.Context, remote, destDir string) (Download
 	return Downloaded{}, last
 }
 
-// archiveName is the file name a repository path ends in.
+// archiveName is the file name a repository path ends in, refused unless it is an
+// ordinary single file name on every platform.
+//
+// The path is built from repository metadata, which a mirror supplied, so the last
+// segment is not trusted: it must not be a path separator, a control character, a
+// character Windows forbids, a name ending in a dot or a space, or a Windows
+// device. path.Base splits only on '/', so a '\' survives it and would escape the
+// destination through filepath.Join on Windows — the reason this check is by
+// content and not by separator count.
+//
+// The rules are the extractor's (internal/extract/path.go), applied to the one name
+// this layer writes rather than to an archive entry.
 func archiveName(remote string) (string, error) {
-	switch name := path.Base(remote); name {
-	case "", ".", "..", "/":
+	name := path.Base(remote)
+	if reason := unsafeName(name); reason != "" {
 		return "", errs.New(exitcode.Usage, errs.CodeUnexpectedValue, errs.PhaseConfig,
-			"%q does not name an archive", remote)
-	default:
-		return name, nil
+			"%q does not name an archive file: %s", remote, reason)
 	}
+	return name, nil
+}
+
+// unsafeName says what makes a single name unsafe to write, or "" when it is
+// ordinary.
+func unsafeName(name string) string {
+	switch name {
+	case "":
+		return "it is empty"
+	case ".", "..":
+		return fmt.Sprintf("it is %q", name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return "it holds a path separator"
+	}
+	for _, r := range name {
+		if r < ' ' {
+			return "it holds a control character"
+		}
+	}
+	if strings.ContainsAny(name, `<>:"|?*`) {
+		return "it holds a character no file name may"
+	}
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, " ") {
+		return "it ends in a dot or a space"
+	}
+	if windowsDevice(name) {
+		return "Windows reads it as a device"
+	}
+	return ""
+}
+
+// windowsDevice reports whether Windows would take the name for a device rather
+// than a file, sending the bytes somewhere other than the destination.
+func windowsDevice(name string) bool {
+	stem := name
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		stem = name[:i]
+	}
+	switch strings.ToUpper(stem) {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(stem) == 4 {
+		head, tail := strings.ToUpper(stem[:3]), stem[3]
+		if (head == "COM" || head == "LPT") && tail >= '1' && tail <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 // digestFor reads the expected digest from the official endpoint, never from the
 // source that will serve the bytes. When the official endpoint says the path is
 // not there, a configured TrustBaseChecksum lets the primary source's own digest
 // stand in — the private-base case ADR-007 decision 3 allows.
+//
+// Both requests use the stay-on-host client. The base is the root of trust once
+// its digest is accepted, so it answers to the same rule the official endpoint
+// does: a digest that arrives by way of another host is refused either way.
 func (c *Client) digestFor(ctx context.Context, remote string) (string, error) {
 	suffix := remote + "." + string(c.alg)
 	digest, err := c.sidecar(ctx, c.digest, join(c.official, suffix))
@@ -82,7 +147,7 @@ func (c *Client) digestFor(ctx context.Context, remote string) (string, error) {
 		return "", err
 	}
 	if c.trust {
-		fromBase, baseErr := c.sidecar(ctx, c.small, join(c.sources[0], suffix))
+		fromBase, baseErr := c.sidecar(ctx, c.digest, join(c.sources[0], suffix))
 		switch {
 		case baseErr == nil:
 			return fromBase, nil
