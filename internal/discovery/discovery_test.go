@@ -182,3 +182,72 @@ func TestSegmentCoversTheDesktopHosts(t *testing.T) {
 		}
 	}
 }
+
+// A desktop host the table has not been taught is refused rather than pointed at
+// a guess. all_os is one: it addresses cross targets, not a desktop.
+func TestSegmentRefusesADesktopHostItDoesNotKnow(t *testing.T) {
+	if _, err := Segment(model.HostAll, model.KindDesktop); err == nil {
+		t.Error("Segment(all_os, desktop) was given a segment before its layout is known")
+	}
+}
+
+// A listing with nothing version-shaped under it is a refusal, not an empty
+// answer: the caller asked what versions a target holds and there are none to
+// name.
+func TestVersionsRefusesAListingWithoutVersions(t *testing.T) {
+	const index = `<html><head><title>Index of /online/qtsdkrepository/windows_x86/desktop</title></head>` +
+		`<body><h1>Index of /online/qtsdkrepository/windows_x86/desktop</h1>` +
+		`<a href="not-a-version/">not-a-version/</a>` +
+		`<a href="Updates.xml">Updates.xml</a></body></html>`
+	d := New(memFetcher{desktop: index})
+
+	_, err := d.Versions(context.Background(), desktop)
+	assertFailure(t, err, exitcode.NotFound, errs.CodeVersionNotFound)
+}
+
+func TestVersionsReportsAFetchFailure(t *testing.T) {
+	d := New(memFetcher{})
+
+	_, err := d.Versions(context.Background(), desktop)
+	assertFailure(t, err, exitcode.NotFound, errs.CodeHTTPNotFound)
+}
+
+// A page that does not call itself a listing is refused by the repository
+// reader, and discovery passes that refusal through rather than reading an empty
+// directory out of a mirror or error page (ADR-008 decision 4).
+func TestVersionsRefusesAPageThatIsNotAListing(t *testing.T) {
+	d := New(memFetcher{desktop: `<html><body>a mirror status page, not a listing</body></html>`})
+
+	_, err := d.Versions(context.Background(), desktop)
+	if err == nil {
+		t.Error("Versions on a page that is not a listing = nil, want a refusal")
+	}
+}
+
+func TestLeavesReportsAFetchFailure(t *testing.T) {
+	d := New(memFetcher{})
+
+	_, err := d.Leaves(context.Background(), desktop+"/qt6_680")
+	assertFailure(t, err, exitcode.NotFound, errs.CodeHTTPNotFound)
+}
+
+func TestMetadataReportsAFetchFailure(t *testing.T) {
+	leaf := Leaf{Path: desktop + "/qt6_680/qt6_680"}
+	d := New(memFetcher{})
+
+	_, _, err := d.Metadata(context.Background(), leaf)
+	assertFailure(t, err, exitcode.NotFound, errs.CodeHTTPNotFound)
+}
+
+// A truncated Updates.xml is refused by the parser, and discovery passes that
+// refusal through: the metadata is the authority on what a version holds, so a
+// document that cannot be read is a failure rather than an empty package list.
+func TestMetadataReportsAMalformedDocument(t *testing.T) {
+	leaf := Leaf{Path: desktop + "/qt6_680/qt6_680"}
+	d := New(memFetcher{leaf.Path + "/Updates.xml": fixture(t, "updates-malformed", "Updates.xml")})
+
+	_, _, err := d.Metadata(context.Background(), leaf)
+	if err == nil {
+		t.Error("Metadata on a malformed document = nil, want a refusal")
+	}
+}
