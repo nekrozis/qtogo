@@ -24,8 +24,10 @@ go run ./bootstrap test -race   # tests with the race detector
 ```
 
 The extractor is C, so the driver names the compiler cgo needs —
-[zig](https://ziglang.org/) on every platform — and always builds for the host. `-race`
-needs tsan, which zig does not provide, so it uses the host's own compiler.
+[zig](https://ziglang.org/) on every platform — and always builds for the host. `build
+-cc <compiler>` uses a different compiler instead, which is what a distribution package
+needs. `-race` needs tsan, which zig does not provide, so it uses the host's own
+compiler.
 
 `go run` reports its own status, so a script that needs the driver's exit code — the one
 that tells a usage mistake from a failed step — should build the driver and run it

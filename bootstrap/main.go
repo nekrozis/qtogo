@@ -34,7 +34,9 @@ import (
 
 const usage = `usage: bootstrap <command> [arguments]
 
-  build [-o <path>]   build the qtogo binary for this host
+  build [-o <path>] [-cc <compiler>]
+                      build the qtogo binary for this host; -cc names the C
+                      compiler instead of the default zig
   test [-race]        run the unit tests
   check               gofmt check, go vet, the tests, golangci-lint
   release             write a host archive and its checksum into dist/
@@ -117,15 +119,23 @@ func usageError(format string, args ...any) error {
 
 func runBuild(ctx context.Context, args []string) error {
 	out := binPath()
-	switch len(args) {
-	case 0:
-	case 2:
-		if args[0] != "-o" {
-			return usageError("unknown argument %q", args[0])
+	// An empty cc keeps the default: zig, with the target this platform needs.
+	cc := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-o":
+			if i+1 == len(args) {
+				return usageError("-o needs a path")
+			}
+			out, i = args[i+1], i+1
+		case "-cc":
+			if i+1 == len(args) {
+				return usageError("-cc needs a compiler")
+			}
+			cc, i = args[i+1], i+1
+		default:
+			return usageError("unknown argument %q", args[i])
 		}
-		out = args[1]
-	default:
-		return usageError("build takes -o <path> or nothing, not %d arguments", len(args))
 	}
 
 	if dir := filepath.Dir(out); dir != "" {
@@ -135,12 +145,13 @@ func runBuild(ctx context.Context, args []string) error {
 	}
 
 	version, commit, date := describedBuild(ctx)
-	return buildBinary(ctx, out, version, commit, date)
+	return buildBinary(ctx, out, cc, version, commit, date)
 }
 
-// buildBinary writes the qtogo binary to out, stamped with the build it came from.
-func buildBinary(ctx context.Context, out, version, commit, date string) error {
-	env, err := buildEnv(false)
+// buildBinary writes the qtogo binary to out, stamped with the build it came from. An
+// empty cc means the default compiler; see buildEnv.
+func buildBinary(ctx context.Context, out, cc, version, commit, date string) error {
+	env, err := buildEnv(false, cc)
 	if err != nil {
 		return err
 	}
@@ -175,7 +186,9 @@ func runRelease(ctx context.Context, args []string) error {
 	defer func() { _ = os.RemoveAll(staging) }()
 
 	binary := filepath.Join(staging, "qtogo"+exeSuffix())
-	if err := buildBinary(ctx, binary, version, commit, date); err != nil {
+	// A release always uses the default compiler: the artifacts this project publishes
+	// are the ones zig built.
+	if err := buildBinary(ctx, binary, "", version, commit, date); err != nil {
 		return err
 	}
 
@@ -311,7 +324,7 @@ func runTest(ctx context.Context, args []string) error {
 		}
 	}
 
-	env, err := buildEnv(race)
+	env, err := buildEnv(race, "")
 	if err != nil {
 		return err
 	}
@@ -329,7 +342,7 @@ func runCheck(ctx context.Context, args []string) error {
 	if err := checkFormatting(ctx); err != nil {
 		return err
 	}
-	env, err := buildEnv(false)
+	env, err := buildEnv(false, "")
 	if err != nil {
 		return err
 	}
@@ -383,7 +396,8 @@ var lookPath = exec.LookPath
 // on and the C compiler named.
 // The platform rules live in cCompiler, which takes the host as an argument and can be
 // exercised for one the driver is not running on. This only assembles the environment.
-func buildEnv(race bool) ([]string, error) {
+// A named compiler -- what `build -cc` passes, empty otherwise -- replaces the default.
+func buildEnv(race bool, named string) ([]string, error) {
 	env := append(without(os.Environ(), "CGO_ENABLED"), "CGO_ENABLED=1")
 	if race {
 		// The race detector needs tsan symbols, which zig does not provide, so a race
@@ -391,18 +405,18 @@ func buildEnv(race bool) ([]string, error) {
 		// inherited CC is what makes that true whatever shell started this.
 		return without(env, "CC"), nil
 	}
-	cc, err := cCompiler(runtime.GOOS, runtime.GOARCH)
+	compiler, err := cCompiler(runtime.GOOS, runtime.GOARCH, named)
 	if err != nil {
 		return nil, err
 	}
 	// Say the compiler is absent here, before the build starts: cgo would otherwise
 	// fail somewhere inside itself, and "the tool the driver needs is not installed" is
 	// what the reader actually has to act on.
-	program := strings.Fields(cc)[0]
+	program := strings.Fields(compiler)[0]
 	if _, err := lookPath(program); err != nil {
 		return nil, fmt.Errorf("%s is not on PATH, and cgo needs it to build the archive extractor: %w", program, err)
 	}
-	return append(without(env, "CC"), "CC="+cc), nil
+	return append(without(env, "CC"), "CC="+compiler), nil
 }
 
 // without drops any inherited setting of name, so what the driver decides is what the
@@ -430,11 +444,18 @@ const glibcFloor = "2.31"
 
 // cCompiler is the C compiler cgo uses on this host, target and all.
 //
-// Zig is the compiler on every platform, so one toolchain decides what the C sources
-// are compiled with rather than each host's own idea of it. On Linux it is also told
-// which glibc to build against: without that the binary would link against whatever
-// the machine that built it has, and refuse to start on anything older.
-func cCompiler(goos, goarch string) (string, error) {
+// With no name given, zig is the compiler on every platform, so one toolchain decides
+// what the C sources are compiled with rather than each host's own idea of it. On Linux
+// it is also told which glibc to build against: without that the binary would link
+// against whatever the machine that built it has, and refuse to start on anything older.
+//
+// A name -- what `build -cc` passes -- is used as it stands and skips those rules: they
+// describe zig, and a distribution building qtogo against its own toolchain wants its
+// own compiler, not zig's target.
+func cCompiler(goos, goarch, named string) (string, error) {
+	if named != "" {
+		return named, nil
+	}
 	if goos == "linux" {
 		triple, err := linuxTriple(goarch)
 		if err != nil {

@@ -40,7 +40,7 @@ func TestCCompilerNamesOnePerHost(t *testing.T) {
 		{"darwin", "arm64", "zig cc"},
 	}
 	for _, tt := range tests {
-		got, err := cCompiler(tt.goos, tt.goarch)
+		got, err := cCompiler(tt.goos, tt.goarch, "")
 		if err != nil {
 			t.Errorf("cCompiler(%s/%s) = %v", tt.goos, tt.goarch, err)
 			continue
@@ -48,6 +48,18 @@ func TestCCompilerNamesOnePerHost(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("cCompiler(%s/%s) = %q, want %q", tt.goos, tt.goarch, got, tt.want)
 		}
+	}
+}
+
+// A compiler the caller names is used as it stands: the platform rules, including the
+// glibc target, describe zig and do not apply to a compiler we did not choose.
+func TestCCompilerUsesTheNamedCompiler(t *testing.T) {
+	got, err := cCompiler("linux", "amd64", "gcc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "gcc" {
+		t.Errorf("cCompiler with a named compiler = %q, want %q", got, "gcc")
 	}
 }
 
@@ -60,7 +72,7 @@ func TestCCompilerRefusesWhatItDoesNotKnow(t *testing.T) {
 		{"linux", "386"},
 	}
 	for _, tt := range tests {
-		if _, err := cCompiler(tt.goos, tt.goarch); err == nil {
+		if _, err := cCompiler(tt.goos, tt.goarch, ""); err == nil {
 			t.Errorf("cCompiler(%s/%s) = nil, want a refusal", tt.goos, tt.goarch)
 		}
 	}
@@ -91,7 +103,7 @@ func TestLinuxTriple(t *testing.T) {
 func TestBuildEnvRaceLeavesTheCompilerAlone(t *testing.T) {
 	t.Setenv("CC", "zig cc")
 
-	env, err := buildEnv(true)
+	env, err := buildEnv(true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,11 +121,11 @@ func TestBuildEnvNamesTheCompilerForThisHost(t *testing.T) {
 	t.Setenv("CC", "some-other-cc")
 	stubLookPath(t, nil)
 
-	want, err := cCompiler(runtime.GOOS, runtime.GOARCH)
+	want, err := cCompiler(runtime.GOOS, runtime.GOARCH, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := buildEnv(false)
+	env, err := buildEnv(false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,12 +139,25 @@ func TestBuildEnvNamesTheCompilerForThisHost(t *testing.T) {
 	}
 }
 
+// `build -cc` threads the named compiler into the environment cgo reads.
+func TestBuildEnvUsesTheNamedCompiler(t *testing.T) {
+	stubLookPath(t, nil)
+
+	env, err := buildEnv(false, "gcc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lastValue(env, "CC"); got != "gcc" {
+		t.Errorf("CC = %q, want %q", got, "gcc")
+	}
+}
+
 // A missing compiler is reported as a missing tool, naming it, rather than as a
 // compiler error somewhere inside the build.
 func TestBuildEnvReportsAMissingCompiler(t *testing.T) {
 	stubLookPath(t, errors.New("executable file not found"))
 
-	if _, err := buildEnv(false); err == nil {
+	if _, err := buildEnv(false, ""); err == nil {
 		t.Fatal("buildEnv = nil, want an error when the compiler is not installed")
 	}
 }
@@ -170,7 +195,7 @@ func TestRunRefusesWhatItDoesNotUnderstand(t *testing.T) {
 		"unknown command":                   {"buidl"},
 		"unknown flag":                      {"build", "-race"},
 		"-o without a path":                 {"build", "-o"},
-		"bare -o":                           {"build", "-o"},
+		"-cc without a compiler":            {"build", "-cc"},
 		"check with args":                   {"check", "extra"},
 		"test with a flag it does not know": {"test", "-v"},
 	}
