@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 
 	"github.com/nekrozis/qtogo/internal/buildinfo"
 	"github.com/nekrozis/qtogo/internal/errs"
+	"github.com/nekrozis/qtogo/internal/model"
 )
 
 // renderer keeps the two output contracts apart: stdout carries payloads,
@@ -54,6 +56,63 @@ func (r renderer) help(path []string) error {
 	return wErr
 }
 
+// listQtPayload is the JSON shape of a successful list-qt.
+type listQtPayload struct {
+	Host     string   `json:"host"`
+	Target   string   `json:"target"`
+	Versions []string `json:"versions"`
+}
+
+// listQt renders the versions a target offers, one per line in text and as a
+// document in JSON.
+func (r renderer) listQt(ctx context.Context, inv invocation, svc Services) error {
+	host, kind, err := listQtRequest(inv)
+	if err != nil {
+		return err
+	}
+	versions, err := svc.ListQtVersions(ctx, host, kind)
+	if err != nil {
+		return err
+	}
+	if r.json {
+		names := make([]string, len(versions))
+		for i, v := range versions {
+			names[i] = v.Dotted()
+		}
+		return writeJSON(r.out, listQtPayload{Host: string(host), Target: string(kind), Versions: names})
+	}
+	for _, v := range versions {
+		if _, err := fmt.Fprintln(r.out, v.Dotted()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// listQtRequest reads the host and target list-qt was asked for. The target
+// defaults to desktop, the one this build can address so far.
+func listQtRequest(inv invocation) (model.Host, model.Kind, error) {
+	rawHost, ok := inv.value(optHost)
+	if !ok {
+		return "", "", errs.Usagef(errs.CodeMissingArgument, "list-qt needs --host").
+			WithSuggestion("%s", helpHint())
+	}
+	host, err := model.ParseHost(rawHost)
+	if err != nil {
+		return "", "", errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint())
+	}
+
+	kind := model.KindDesktop
+	if raw, ok := inv.value(optTarget); ok {
+		kind, err = model.ParseKind(raw)
+		if err != nil {
+			return "", "", errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint())
+		}
+	}
+	return host, kind, nil
+}
+
+// writeJSON writes a document that automation reads.
 func writeJSON(w io.Writer, v any) error {
 	return json.NewEncoder(w).Encode(v)
 }

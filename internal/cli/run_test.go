@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -11,10 +12,11 @@ import (
 	"github.com/nekrozis/qtogo/internal/exitcode"
 )
 
-// run executes one command line and returns the exit code with both streams.
+// run executes one command line and returns the exit code with both streams. The
+// commands these tests drive are the ones that need no service.
 func run(args ...string) (int, string, string) {
 	var out, errOut bytes.Buffer
-	code := Main(args, &out, &errOut)
+	code := Main(context.Background(), args, &out, &errOut, nil)
 	return code, out.String(), errOut.String()
 }
 
@@ -81,7 +83,7 @@ func TestMainUsageFailuresGoToStderr(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"unknown command", []string{"list-qt"}, `unknown command "list-qt"`},
+		{"unknown command", []string{"no-such-command"}, `unknown command "no-such-command"`},
 		{"unknown option", []string{"--nope"}, "unknown option --nope"},
 		{"unexpected argument", []string{"version", "extra"}, `unexpected argument "extra"`},
 		{"value on a flag", []string{"--json=1"}, "does not take a value"},
@@ -107,7 +109,7 @@ func TestMainUsageFailuresGoToStderr(t *testing.T) {
 // TestMainJSONFailureShape covers the case the pre-scan exists for: parsing
 // itself fails, and the failure still has to be machine-readable.
 func TestMainJSONFailureShape(t *testing.T) {
-	code, stdout, stderr := run("list-qt", "--json")
+	code, stdout, stderr := run("no-such-command", "--json")
 
 	if code != exitcode.Usage {
 		t.Fatalf("exit = %d, want %d", code, exitcode.Usage)
@@ -164,7 +166,7 @@ func TestMainHelp(t *testing.T) {
 func TestRunReturnsFailureWithoutWritingDiagnostics(t *testing.T) {
 	var out, errOut bytes.Buffer
 
-	err := Run([]string{"nope"}, &out, &errOut)
+	err := Run(context.Background(), []string{"nope"}, &out, &errOut, nil)
 
 	if err == nil {
 		t.Fatal("Run returned nil error for an unknown command")

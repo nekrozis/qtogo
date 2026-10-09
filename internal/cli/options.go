@@ -10,6 +10,8 @@ const (
 	optHelp optionID = iota
 	optVersion
 	optJSON
+	optHost
+	optTarget
 )
 
 // optionSpec is the vocabulary entry for one option.
@@ -18,12 +20,25 @@ type optionSpec struct {
 	long    string
 	aliases []string
 	summary string
+	// takesValue marks an option that carries a value, written either as
+	// "--name value" or "--name=value".
+	takesValue bool
+	// value names what the value is, for the usage text ("--host <host>").
+	value string
 }
 
 var optionTable = []optionSpec{
 	{id: optHelp, long: "help", aliases: []string{"h"}, summary: "Show help"},
 	{id: optVersion, long: "version", summary: "Show the version"},
 	{id: optJSON, long: "json", summary: "Write machine-readable JSON instead of text"},
+	{
+		id: optHost, long: "host", summary: "The platform to list for",
+		takesValue: true, value: "host",
+	},
+	{
+		id: optTarget, long: "target", summary: "The platform family to list for",
+		takesValue: true, value: "target",
+	},
 }
 
 // commonOptions are accepted by every command: asking for help is always
@@ -87,8 +102,14 @@ func (s optionSpec) hasAlias(name string) bool {
 	return false
 }
 
-// display renders the long form, the way the user would type it.
-func (s optionSpec) display() string { return "--" + s.long }
+// display renders the long form with its value placeholder, the way the user
+// would type it.
+func (s optionSpec) display() string {
+	if s.takesValue {
+		return "--" + s.long + " <" + s.value + ">"
+	}
+	return "--" + s.long
+}
 
 // label renders "-h, --help".
 func (s optionSpec) label() string {

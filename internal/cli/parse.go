@@ -26,6 +26,11 @@ type invocation struct {
 
 	// json mirrors --json.
 	json bool
+
+	// values holds the value of each value-taking option, in the order they were
+	// written. A repeated option keeps every value, so the first is the one an
+	// option that takes one value uses and a list option reads them all.
+	values map[optionID][]string
 }
 
 // parseArgs turns a command line into an invocation. All grammar lives here and
@@ -37,6 +42,7 @@ func parseArgs(args []string) (invocation, error) {
 	if err != nil {
 		return invocation{}, err
 	}
+	inv.values = collectValues(used)
 	inv.json = hasOption(used, optJSON)
 
 	// Help wins over everything: it is the one thing a user can always ask for.
@@ -96,10 +102,36 @@ func parseArgs(args []string) (invocation, error) {
 	return inv, nil
 }
 
-// usedOption is one option found on the command line.
-type usedOption struct{ spec optionSpec }
+// usedOption is one option found on the command line, with its value when it
+// takes one.
+type usedOption struct {
+	spec  optionSpec
+	value string
+}
 
-// split separates options from words. A "--" token ends option parsing.
+// collectValues gathers the value of each value-taking option, keeping repeats.
+func collectValues(used []usedOption) map[optionID][]string {
+	values := make(map[optionID][]string)
+	for _, u := range used {
+		if u.spec.takesValue {
+			values[u.spec.id] = append(values[u.spec.id], u.value)
+		}
+	}
+	return values
+}
+
+// value returns the value of a single-valued option and whether it was given. A
+// repeated option yields its last value.
+func (inv invocation) value(id optionID) (string, bool) {
+	got := inv.values[id]
+	if len(got) == 0 {
+		return "", false
+	}
+	return got[len(got)-1], true
+}
+
+// split separates options from words. A "--" token ends option parsing. An option
+// that takes a value reads it from "--name=value" or from the word after it.
 func split(args []string) ([]usedOption, []string, error) {
 	used := make([]usedOption, 0, len(args))
 	words := make([]string, 0, len(args))
@@ -115,16 +147,28 @@ func split(args []string) ([]usedOption, []string, error) {
 			continue
 		}
 
-		name, _, hasValue := cutOption(a)
+		name, inline, hasValue := cutOption(a)
 		spec, ok := lookupOption(name)
 		if !ok {
 			return nil, nil, unknownOption(name)
 		}
-		if hasValue {
-			return nil, nil, errs.Usagef(errs.CodeUnexpectedValue, "option %s does not take a value", spec.display()).
-				WithSuggestion("write %s on its own", spec.display())
+		if !spec.takesValue {
+			if hasValue {
+				return nil, nil, errs.Usagef(errs.CodeUnexpectedValue, "option %s does not take a value", spec.display()).
+					WithSuggestion("write %s on its own", spec.display())
+			}
+			used = append(used, usedOption{spec: spec})
+			continue
 		}
-		used = append(used, usedOption{spec: spec})
+		if !hasValue {
+			if i+1 == len(args) || isOptionToken(args[i+1]) {
+				return nil, nil, errs.Usagef(errs.CodeMissingArgument, "option %s needs a value", spec.display()).
+					WithSuggestion("write it as %s", spec.display())
+			}
+			i++
+			inline = args[i]
+		}
+		used = append(used, usedOption{spec: spec, value: inline})
 	}
 
 	return used, words, nil
