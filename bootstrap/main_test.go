@@ -196,6 +196,8 @@ func TestRunRefusesWhatItDoesNotUnderstand(t *testing.T) {
 		"unknown flag":                      {"build", "-race"},
 		"-o without a path":                 {"build", "-o"},
 		"-cc without a compiler":            {"build", "-cc"},
+		"-cc with an empty compiler":        {"build", "-cc", ""},
+		"-cc with a blank compiler":         {"build", "-cc", "  "},
 		"check with args":                   {"check", "extra"},
 		"test with a flag it does not know": {"test", "-v"},
 	}

@@ -129,7 +129,10 @@ func runBuild(ctx context.Context, args []string) error {
 			}
 			out, i = args[i+1], i+1
 		case "-cc":
-			if i+1 == len(args) {
+			// A flag that names nothing is a mistake, not a silent fall back to the
+			// default: what the caller wrote is what the build should use, or the
+			// command should say so.
+			if i+1 == len(args) || strings.TrimSpace(args[i+1]) == "" {
 				return usageError("-cc needs a compiler")
 			}
 			cc, i = args[i+1], i+1
