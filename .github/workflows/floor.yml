@@ -1,0 +1,73 @@
+name: glibc floor
+
+# Not part of the ordinary check: this builds a Linux binary and starts it in two
+# containers, which is the slowest thing the repository does, and it guards one
+# promise rather than the code in general. It runs when one of the things that could
+# change that promise moves -- the driver, the toolchain it installs, the vendored C --
+# and on demand, which is what a release should do before it publishes a Linux binary.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "bootstrap/**"
+      - ".github/scripts/**"
+      - ".github/workflows/floor.yml"
+      - "internal/lzma/**"
+
+concurrency:
+  group: floor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  floor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.x"
+
+      - name: Restore zig
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/zig
+          key: zig-0.17.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install zig
+        shell: bash
+        env:
+          ZIG_DIR: ${{ runner.temp }}/zig
+        run: |
+          bash .github/scripts/install-zig.sh 0.17.0 "$ZIG_DIR"
+          echo "$ZIG_DIR" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: go run ./bootstrap build -o dist/qtogo
+
+      - name: It needs no glibc newer than the floor
+        run: |
+          floor=2.31
+          # Nothing today, and not because of the floor or the compiler: the same
+          # sources built with the system gcc come out byte-identical, both static,
+          # because no cgo object references a libc symbol. This is what says whether
+          # that still holds, and whether the floor is what protects the binary if it
+          # stops holding.
+          highest=$(objdump -T dist/qtogo 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 || true)
+          echo "highest glibc requirement: ${highest:-none, the binary is linked statically}"
+          if [ -n "$highest" ] &&
+            [ "$(printf 'GLIBC_%s\n%s\n' "$floor" "$highest" | sort -V | tail -1)" != "GLIBC_$floor" ]; then
+            echo "the binary requires $highest, which is newer than the $floor floor" >&2
+            exit 1
+          fi
+
+      - name: At the floor and above it, the binary starts
+        run: |
+          for image in debian:11 ubuntu:22.04; do
+            echo "== $image"
+            docker run --rm -v "$PWD/dist:/dist:ro" "$image" /dist/qtogo version
+          done

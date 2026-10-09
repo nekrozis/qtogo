@@ -16,7 +16,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -24,11 +24,30 @@ jobs:
         with:
           go-version: "1.27.x"
 
-      - name: Build
-        run: go build ./...
+      # cgo builds the archive extractor, and the driver names the compiler rather than
+      # leaving it to the machine; see bootstrap/main.go for which one and why. The
+      # version is pinned, so a zig release cannot change what CI builds.
+      - name: Restore zig
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/zig
+          key: zig-0.17.0-${{ runner.os }}-${{ runner.arch }}
 
+      - name: Install zig
+        shell: bash
+        env:
+          ZIG_DIR: ${{ runner.temp }}/zig
+        run: |
+          bash .github/scripts/install-zig.sh 0.17.0 "$ZIG_DIR"
+          echo "$ZIG_DIR" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: go run ./bootstrap build
+
+      # The race detector needs tsan symbols, which zig does not provide, so a race
+      # build is left to the host's own compiler.
       - name: Test (race)
-        run: go test -count=1 -race ./...
+        run: go run ./bootstrap test -race
 
   lint:
     runs-on: ubuntu-latest

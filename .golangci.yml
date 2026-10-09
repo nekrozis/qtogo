@@ -39,6 +39,15 @@ linters:
       - path: internal/lzma/cgo\.go
         linters: [gocritic]
         text: dupSubExpr
+      # The build driver does what its command line says: it runs go, git and
+      # golangci-lint, and it writes the binary where -o points. gosec's taint
+      # analysis starts at os.Args, so it reports each of those as injection,
+      # traversal or an unbounded index -- which here is the driver's job description,
+      # not a finding. There is no caller above it to validate against. What the
+      # arguments mean is unit-tested in this package.
+      - path: ^bootstrap/
+        linters: [gosec]
+        text: G204|G602|G702|G703
 
 formatters:
   enable:
