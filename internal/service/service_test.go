@@ -82,3 +82,83 @@ func TestListQtVersionsRefusesACrossTarget(t *testing.T) {
 	_, err := s.ListQtVersions(context.Background(), model.HostAll, model.KindAndroid)
 	assertFailure(t, err, exitcode.Usage, errs.CodeNotEnabled)
 }
+
+// planFixture wires a target with one flat version directory whose leaf holds an
+// Updates.xml naming a base package.
+func planFixture() memFetcher {
+	const leaf = desktop + "/qt6_680"
+	updates := `<Updates><PackageUpdate><Name>qt.qt6.680.win64_msvc2022_64</Name>` +
+		`<Version>6.8.0-0-202410030750</Version>` +
+		`<DownloadableArchives>qtbase.7z</DownloadableArchives>` +
+		`<Operations><Operation name="Extract"><Argument>@TargetDir@/6.8.0/msvc2022_64</Argument>` +
+		`<Argument>qtbase.7z</Argument></Operation></Operations></PackageUpdate></Updates>`
+	leafIndex := `<html><head><title>Index of /` + leaf + `</title></head><body>` +
+		`<h1>Index of /` + leaf + `</h1><a href="Updates.xml">Updates.xml</a></body></html>`
+
+	return memFetcher{
+		desktop:               targetIndex("qt6_680"),
+		leaf:                  leafIndex,
+		leaf + "/Updates.xml": updates,
+	}
+}
+
+func TestPlanInstallQtBuildsAPlan(t *testing.T) {
+	s := New(planFixture())
+	version, err := model.ParseVersion("6.8.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := s.PlanInstallQt(context.Background(), model.HostWindows, model.KindDesktop,
+		version, "win64_msvc2022_64", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Version != "6.8.0" || plan.Token != "680" {
+		t.Errorf("plan identity = %+v", plan)
+	}
+	if len(plan.Archives) != 1 || plan.Archives[0].InstallPath != "6.8.0/msvc2022_64" {
+		t.Errorf("archives = %+v", plan.Archives)
+	}
+}
+
+// A version is matched by its numbers, so the request names the release and not
+// the directory token it is spelled with.
+func TestPlanInstallQtMatchesByNumbers(t *testing.T) {
+	s := New(planFixture())
+	version, err := model.ParseVersion("6.8.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PlanInstallQt(context.Background(), model.HostWindows, model.KindDesktop,
+		version, "", nil); err != nil {
+		t.Fatalf("PlanInstallQt = %v, want it to find the directory spelled 680", err)
+	}
+}
+
+func TestPlanInstallQtReportsAMissingVersion(t *testing.T) {
+	s := New(planFixture())
+	version, err := model.ParseVersion("6.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.PlanInstallQt(context.Background(), model.HostWindows, model.KindDesktop, version, "", nil)
+	assertFailure(t, err, exitcode.NotFound, errs.CodeVersionNotFound)
+}
+
+// A version directory with several leaves needs the architecture to choose one.
+func TestPlanInstallQtNeedsAnArchForASplitLayout(t *testing.T) {
+	const dir = desktop + "/qt6_680"
+	index := `<html><head><title>Index of /` + dir + `</title></head><body>` +
+		`<h1>Index of /` + dir + `</h1>` +
+		`<a href="qt6_680_mingw/">qt6_680_mingw/</a>` +
+		`<a href="qt6_680_msvc2022_64/">qt6_680_msvc2022_64/</a></body></html>`
+	s := New(memFetcher{desktop: targetIndex("qt6_680"), dir: index})
+	version, err := model.ParseVersion("6.8.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.PlanInstallQt(context.Background(), model.HostWindows, model.KindDesktop, version, "", nil)
+	assertFailure(t, err, exitcode.NotFound, errs.CodePackageNotFound)
+}

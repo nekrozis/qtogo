@@ -11,11 +11,27 @@ not in advance.
 | --- | --- |
 | `qtogo help [topic]`, `-h`, `--help` | implemented; generated from the command tree |
 | `qtogo version`, `--version` | implemented; one line, exit 0 |
-| `qtogo list-qt --host <host> [--target <target>] [--json]` | implemented; the desktop targets of windows, linux and mac |
+| `qtogo list-qt <host> <target> [--json]` | implemented; the desktop targets of windows, linux and mac |
+| `qtogo plan install-qt <host> <target> <version> [<arch>] [-m <module>]... [--json]` | implemented; plans what an installation would fetch, without fetching it |
 | anything else, including `install-qt` and the `*-official` verbs | absent: `unknown command "<word>"`, exit 2 |
 
 A verb that is not implemented is absent rather than a stub, so a typo and an
 unbuilt feature look the same on purpose: neither silently does nothing.
+
+## Options
+
+Where this build takes an option the reference tool also has, it keeps that tool's
+spelling (ADR-009 decision 8). One deliberate difference sits on top:
+
+| Option | qtogo | reference tool |
+| --- | --- | --- |
+| `-m <module>...` / `--modules <module>...` | an option repeated per module, or one value split on commas | one option taking a space-separated list, or a bare `all` for every module |
+| `list-qt <host> <target>` | the target is required | the target is optional; without it, every target is listed |
+
+The comma form is a convenience this build adds, and `all` is left out until the
+module listing a target offers lands, because "every module" is a rule it needs. The
+target is required here because the shape is shared with `plan install-qt`, which
+needs one; listing every target at once is a mode this build does not have yet.
 
 ## Output
 

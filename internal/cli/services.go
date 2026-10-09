@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 
+	"github.com/nekrozis/qtogo/internal/catalog"
 	"github.com/nekrozis/qtogo/internal/model"
 )
 
@@ -13,4 +14,9 @@ import (
 type Services interface {
 	// ListQtVersions returns the Qt versions a host and target offer.
 	ListQtVersions(ctx context.Context, host model.Host, kind model.Kind) ([]model.Version, error)
+
+	// PlanInstallQt builds the installation plan for a version, an architecture
+	// and a set of modules.
+	PlanInstallQt(ctx context.Context, host model.Host, kind model.Kind,
+		version model.Version, arch string, modules []string) (catalog.Plan, error)
 }

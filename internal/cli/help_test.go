@@ -50,6 +50,26 @@ func TestCommandUsageDescribesOneCommand(t *testing.T) {
 	}
 }
 
+// A command's positional arguments appear in its usage line and as their own
+// block, both generated from the same declarations the arity check reads.
+func TestCommandUsageRendersPositionalArguments(t *testing.T) {
+	text, err := commandUsage([]string{"list-qt"})
+	if err != nil {
+		t.Fatalf("commandUsage(list-qt) = %v, want no error", err)
+	}
+
+	for _, want := range []string{
+		"Usage: " + buildinfo.ProgramName + " list-qt <host> <target> [options]",
+		"Arguments:",
+		"<host>",
+		"<target>",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("list-qt usage is missing %q\n%s", want, text)
+		}
+	}
+}
+
 func TestCommandUsageWithoutAPathIsRootUsage(t *testing.T) {
 	text, err := commandUsage(nil)
 	if err != nil {

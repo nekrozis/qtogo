@@ -8,24 +8,40 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nekrozis/qtogo/internal/catalog"
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/exitcode"
 	"github.com/nekrozis/qtogo/internal/model"
 )
 
-// fakeServices answers list-qt without a repository, and records what it was
+// fakeServices answers the commands without a repository, and records what it was
 // asked for.
 type fakeServices struct {
 	versions []model.Version
+	plan     catalog.Plan
 	err      error
 	host     model.Host
 	kind     model.Kind
-	called   bool
+	// the plan request
+	planVersion model.Version
+	planArch    string
+	planModules []string
+	called      bool
+	planCalled  bool
 }
 
 func (f *fakeServices) ListQtVersions(_ context.Context, host model.Host, kind model.Kind) ([]model.Version, error) {
 	f.host, f.kind, f.called = host, kind, true
 	return f.versions, f.err
+}
+
+func (f *fakeServices) PlanInstallQt(_ context.Context, host model.Host, kind model.Kind,
+	version model.Version, arch string, modules []string) (catalog.Plan, error) {
+
+	f.host, f.kind = host, kind
+	f.planVersion, f.planArch, f.planModules = version, arch, modules
+	f.planCalled = true
+	return f.plan, f.err
 }
 
 func runWith(svc Services, args ...string) (int, string, string) {
@@ -50,7 +66,7 @@ func versions(t *testing.T, raws ...string) []model.Version {
 func TestListQtWritesOneVersionPerLine(t *testing.T) {
 	svc := &fakeServices{versions: versions(t, "5.15.2", "6.8.0")}
 
-	code, stdout, stderr := runWith(svc, "list-qt", "--host", "windows")
+	code, stdout, stderr := runWith(svc, "list-qt", "windows", "desktop")
 
 	if code != exitcode.OK {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, exitcode.OK, stderr)
@@ -66,7 +82,7 @@ func TestListQtWritesOneVersionPerLine(t *testing.T) {
 func TestListQtWritesADocumentForJSON(t *testing.T) {
 	svc := &fakeServices{versions: versions(t, "5.15.2")}
 
-	code, stdout, _ := runWith(svc, "list-qt", "--host=linux", "--target", "desktop", "--json")
+	code, stdout, _ := runWith(svc, "list-qt", "linux", "desktop", "--json")
 
 	if code != exitcode.OK {
 		t.Fatalf("exit = %d, want %d", code, exitcode.OK)
@@ -80,19 +96,20 @@ func TestListQtWritesADocumentForJSON(t *testing.T) {
 	}
 }
 
-// An option's value is read the same way whether it is written with "=" or as the
-// next word.
-func TestOptionValuesAreReadBothWays(t *testing.T) {
-	for _, args := range [][]string{
-		{"list-qt", "--host", "mac"},
-		{"list-qt", "--host=mac"},
-	} {
-		svc := &fakeServices{}
-		if code, _, stderr := runWith(svc, args...); code != exitcode.OK {
-			t.Errorf("%q: exit = %d, want %d (%s)", args, code, exitcode.OK, stderr)
-		}
-		if svc.host != model.HostMac {
-			t.Errorf("%q: host = %q, want mac", args, svc.host)
+// Host and target are identity, so they are positional; the options that used to
+// carry them are gone, and asking for one says where the value goes now.
+func TestListQtCarriesItsIdentityPositionally(t *testing.T) {
+	code, stdout, stderr := runWith(&fakeServices{}, "list-qt", "--host", "windows")
+
+	if code != exitcode.Usage {
+		t.Errorf("exit = %d, want %d", code, exitcode.Usage)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+	for _, want := range []string{"--host is not supported", "positionally"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 		}
 	}
 }
@@ -103,11 +120,11 @@ func TestListQtFailures(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"no host", []string{"list-qt"}, "list-qt needs --host"},
-		{"host needs a value", []string{"list-qt", "--host"}, "needs a value"},
-		{"host followed by an option", []string{"list-qt", "--host", "--json"}, "needs a value"},
-		{"unknown host", []string{"list-qt", "--host", "plan9"}, `unknown host "plan9"`},
-		{"unknown target", []string{"list-qt", "--host", "windows", "--target", "solaris"}, `unknown kind "solaris"`},
+		{"no host", []string{"list-qt"}, "needs <host>"},
+		{"no target", []string{"list-qt", "windows"}, "needs <target>"},
+		{"too many arguments", []string{"list-qt", "windows", "desktop", "extra"}, `unexpected argument "extra"`},
+		{"unknown host", []string{"list-qt", "plan9", "desktop"}, `unknown host "plan9"`},
+		{"unknown target", []string{"list-qt", "windows", "solaris"}, `unknown kind "solaris"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,7 +148,7 @@ func TestListQtReportsAServiceFailure(t *testing.T) {
 	want := errs.New(exitcode.NotFound, errs.CodeVersionNotFound, errs.PhaseResolve, "nothing there")
 	svc := &fakeServices{err: want}
 
-	code, _, _ := runWith(svc, "list-qt", "--host", "windows")
+	code, _, _ := runWith(svc, "list-qt", "windows", "desktop")
 
 	if code != exitcode.NotFound {
 		t.Errorf("exit = %d, want %d", code, exitcode.NotFound)
@@ -147,7 +164,7 @@ func TestHelpDescribesListQt(t *testing.T) {
 	if code != exitcode.OK {
 		t.Fatalf("exit = %d, want %d", code, exitcode.OK)
 	}
-	for _, want := range []string{"list-qt", "--host <host>", "--target <target>"} {
+	for _, want := range []string{"list-qt <host> <target>", "Arguments:", "<host>", "<target>"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help does not mention %q:\n%s", want, stdout)
 		}

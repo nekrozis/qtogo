@@ -27,6 +27,15 @@ type invocation struct {
 	// json mirrors --json.
 	json bool
 
+	// path is the command words that were consumed, e.g. ["plan", "install-qt"].
+	// It names the command in a failure even for a namespace node, which carries
+	// no id of its own.
+	path []string
+
+	// args holds the positional arguments, in the order the command declares
+	// them. arg looks one up by name.
+	args []string
+
 	// values holds the value of each value-taking option, in the order they were
 	// written. A repeated option keeps every value, so the first is the one an
 	// option that takes one value uses and a list option reads them all.
@@ -95,11 +104,44 @@ func parseArgs(args []string) (invocation, error) {
 		inv.helpPath = path
 		return inv, nil
 	}
-	if len(rest) > 0 {
-		return invocation{}, unexpectedArgument(rest[0])
+	if err := checkArity(&node, rest, words[:consumed]); err != nil {
+		return invocation{}, err
 	}
+	inv.path = words[:consumed]
+	inv.args = rest
 
 	return inv, nil
+}
+
+// arg returns the positional argument with the declared name, or "" when it was
+// not given. An argument that can be absent reads its absence as the empty
+// string; names come from the command node, so a command reorders its arguments
+// without changing its readers.
+func (inv invocation) arg(name string) string {
+	if inv.node == nil {
+		return ""
+	}
+	for i, a := range inv.node.args {
+		if a.name == name && i < len(inv.args) {
+			return inv.args[i]
+		}
+	}
+	return ""
+}
+
+// checkArity reports a command line with too few or too many positional
+// arguments. Only trailing arguments may be optional, so the required ones are a
+// prefix and the first missing one is the one to name.
+func checkArity(node *commandNode, words []string, path []string) error {
+	if len(words) < node.requiredArgs() {
+		return errs.Usagef(errs.CodeMissingArgument, "%s needs %s",
+			topicLabel(path), node.args[len(words)].display()).
+			WithSuggestion("%s", helpHint())
+	}
+	if len(words) > len(node.args) {
+		return unexpectedArgument(words[len(node.args)])
+	}
+	return nil
 }
 
 // usedOption is one option found on the command line, with its value when it
@@ -118,16 +160,6 @@ func collectValues(used []usedOption) map[optionID][]string {
 		}
 	}
 	return values
-}
-
-// value returns the value of a single-valued option and whether it was given. A
-// repeated option yields its last value.
-func (inv invocation) value(id optionID) (string, bool) {
-	got := inv.values[id]
-	if len(got) == 0 {
-		return "", false
-	}
-	return got[len(got)-1], true
 }
 
 // split separates options from words. A "--" token ends option parsing. An option
@@ -295,7 +327,10 @@ func unexpectedArgument(word string) *errs.Error {
 // removedOptions maps an option the reference implementation accepts but this
 // build does not, to the text the user should read instead. Every hint has to
 // name something the tree actually has.
-var removedOptions = map[string]string{}
+var removedOptions = map[string]string{
+	"host":   "write the host positionally, as in `qtogo list-qt windows desktop`",
+	"target": "write the target positionally, as in `qtogo list-qt windows desktop`",
+}
 
 // helpHint is the one "what now" line every usage failure carries.
 func helpHint() string {

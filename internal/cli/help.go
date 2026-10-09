@@ -32,11 +32,16 @@ func commandUsage(path []string) (string, error) {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Usage: %s %s [options]\n", buildinfo.ProgramName, strings.Join(path, " "))
+	usage := buildinfo.ProgramName + " " + strings.Join(path, " ")
+	for _, a := range node.args {
+		usage += " " + a.display()
+	}
+	fmt.Fprintf(&b, "Usage: %s [options]\n", usage)
 	if node.summary != "" {
 		fmt.Fprintf(&b, "\n%s\n", node.summary)
 	}
 	writeCommandList(&b, node.children)
+	writeArgumentList(&b, node.args)
 	writeOptionBlock(&b, node.options)
 
 	return b.String(), nil
@@ -59,6 +64,26 @@ func writeCommandList(b *strings.Builder, nodes []commandNode) {
 	b.WriteString("\nCommands:\n")
 	for _, n := range nodes {
 		fmt.Fprintf(b, "  %-*s  %s\n", width, n.name, n.summary)
+	}
+}
+
+// writeArgumentList writes the "Arguments:" block for a command's positional
+// arguments, or nothing when it declares none.
+func writeArgumentList(b *strings.Builder, args []argSpec) {
+	if len(args) == 0 {
+		return
+	}
+
+	width := 0
+	for _, a := range args {
+		if len(a.display()) > width {
+			width = len(a.display())
+		}
+	}
+
+	b.WriteString("\nArguments:\n")
+	for _, a := range args {
+		fmt.Fprintf(b, "  %-*s  %s\n", width, a.display(), a.summary)
 	}
 }
 
