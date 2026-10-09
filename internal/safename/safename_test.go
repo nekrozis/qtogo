@@ -1,6 +1,9 @@
 package safename
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCheck(t *testing.T) {
 	tests := []struct {
@@ -44,8 +47,21 @@ func FuzzCheck(f *testing.F) {
 		if p > DeviceName {
 			t.Fatalf("Check(%q) = %d, outside the known problems", name, p)
 		}
-		if p == OK && (name == "" || name == "." || name == "..") {
+		if p != OK {
+			return
+		}
+		// Whatever else is accepted, these can never be: a separator would let the
+		// name leave its directory, and a control character is never ordinary.
+		if name == "" || name == "." || name == ".." {
 			t.Fatalf("Check(%q) accepted a name it must refuse", name)
+		}
+		if strings.ContainsAny(name, `/\`) {
+			t.Fatalf("Check(%q) accepted a name holding a path separator", name)
+		}
+		for _, r := range name {
+			if r < ' ' {
+				t.Fatalf("Check(%q) accepted a name holding a control character", name)
+			}
 		}
 	})
 }
