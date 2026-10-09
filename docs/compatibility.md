@@ -60,6 +60,22 @@ needs one; listing every target at once is a mode this build does not have yet.
 "Not found" (3) and "network" (4) are deliberately separate: a script has to be
 able to tell a mistyped version from an unreachable server.
 
+## Relocation
+
+An extracted tree is corrected so it runs from wherever it is installed (ADR-011).
+Where the reference tool and this build do the same thing, nothing is listed; the
+row below is the deliberate difference.
+
+| What | qtogo | reference tool |
+| --- | --- | --- |
+| `lib/*.la` (libtool archives) | **deleted** | rewritten in place to the new prefix |
+
+A `.la` file's only anchor is an absolute `libdir`, so it cannot be made to work
+from any path — and nothing in a Qt build reads one. Deleting it keeps the
+byte-identical promise that two installs of the same request produce the same tree
+(ADR-011 decision 4); rewriting it, as the reference tool does, would leave a
+value that depends on where the tree landed.
+
 ## Version directory names
 
 A repository version directory (`qt6_6110`, `qt5_515_preview`) is decoded by

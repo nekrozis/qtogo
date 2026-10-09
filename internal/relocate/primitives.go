@@ -86,12 +86,13 @@ func rewriteLicense(_ context.Context, root string, _ model.Target, report *Repo
 
 // rewritePkgConfig points each .pc file at a prefix relative to the file itself.
 //
-// ${pcfiledir} expands to the directory holding the file, so
-// "${pcfiledir}/../.." is the tree root for a file under lib/pkgconfig — a value
-// that is the same wherever the tree is installed.
-func rewritePkgConfig(_ context.Context, root string, target model.Target, report *Report) error {
+// ${pcfiledir} expands to the directory holding the file, so "${pcfiledir}/../.."
+// is the tree root for a file under lib/pkgconfig — a value that is the same
+// wherever the tree is installed. The mac -F flag names a lib directory rather than
+// the root, so it gets "${pcfiledir}/..", one level less.
+func rewritePkgConfig(ctx context.Context, root string, target model.Target, report *Report) error {
 	dir := filepath.Join(root, "lib", "pkgconfig")
-	return eachFile(dir, "*.pc", func(path string) error {
+	return eachFile(ctx, dir, "*.pc", func(path string) error {
 		rel, _ := filepath.Rel(root, path)
 		body, err := os.ReadFile(path)
 		if err != nil {
@@ -99,9 +100,9 @@ func rewritePkgConfig(_ context.Context, root string, target model.Target, repor
 		}
 		text := string(body)
 
-		next := replacePrefixLine(text, "prefix=", "${pcfiledir}/../..")
+		next := replacePrefixLine(text, "prefix=", treeFromPkgConfig)
 		if target.Host == model.HostMac {
-			next = replaceFlag(next, "-F", pkgConfigFlagValue)
+			next = replaceFlag(next, "-F", libFromPkgConfig)
 		}
 		if next == text {
 			return nil
@@ -116,9 +117,13 @@ func rewritePkgConfig(_ context.Context, root string, target model.Target, repor
 
 // rewritePrl replaces the build prefix a .prl records with the qmake variable that
 // stands for the same directory wherever the tree is.
-func rewritePrl(_ context.Context, root string, _ model.Target, report *Report) error {
+//
+// The sentinel is the build prefix's lib directory, not the prefix alone, because
+// $$[QT_INSTALL_LIBS] is itself <prefix>/lib. Substituting the bare prefix would
+// leave the path's own /lib behind and produce $$[QT_INSTALL_LIBS]/lib.
+func rewritePrl(ctx context.Context, root string, _ model.Target, report *Report) error {
 	dir := filepath.Join(root, "lib")
-	return eachFile(dir, "*.prl", func(path string) error {
+	return eachFile(ctx, dir, "*.prl", func(path string) error {
 		rel, _ := filepath.Rel(root, path)
 		body, err := os.ReadFile(path)
 		if err != nil {
@@ -126,7 +131,7 @@ func rewritePrl(_ context.Context, root string, _ model.Target, report *Report) 
 		}
 		text := string(body)
 
-		next := replaceBuildPrefix(text, "$$[QT_INSTALL_LIBS]")
+		next := replaceBuildPrefix(text)
 		if next == text {
 			return nil
 		}
@@ -143,9 +148,9 @@ func rewritePrl(_ context.Context, root string, _ model.Target, report *Report) 
 // Its only anchor is an absolute libdir, which the byte-identical rule forbids, and
 // nothing in a Qt build reads it. Deleting it is the deliberate departure from the
 // reference tool that rewrites it in place (ADR-011 decision 4).
-func removeLibtool(_ context.Context, root string, _ model.Target, report *Report) error {
+func removeLibtool(ctx context.Context, root string, _ model.Target, report *Report) error {
 	dir := filepath.Join(root, "lib")
-	return eachFile(dir, "*.la", func(path string) error {
+	return eachFile(ctx, dir, "*.la", func(path string) error {
 		rel, _ := filepath.Rel(root, path)
 		if err := os.Remove(path); err != nil {
 			return failed("removing "+rel, err)
@@ -157,8 +162,9 @@ func removeLibtool(_ context.Context, root string, _ model.Target, report *Repor
 
 // eachFile runs fn for every file in dir matching pattern. A directory that is not
 // there is a skip, not a failure: a tree that does not carry the file has nothing
-// to correct.
-func eachFile(dir, pattern string, fn func(string) error, report *Report) error {
+// to correct. The context is checked between files, so cancelling a walk over a
+// large lib directory stops it rather than waiting for the whole list.
+func eachFile(ctx context.Context, dir, pattern string, fn func(string) error, report *Report) error {
 	matches, err := filepath.Glob(filepath.Join(dir, pattern))
 	if err != nil {
 		return failed("listing "+dir, err)
@@ -168,6 +174,9 @@ func eachFile(dir, pattern string, fn func(string) error, report *Report) error 
 		return nil
 	}
 	for _, m := range matches {
+		if err := ctx.Err(); err != nil {
+			return cancelled(err)
+		}
 		if err := fn(m); err != nil {
 			return err
 		}
@@ -230,26 +239,43 @@ func cutPath(s string) (path, tail string) {
 	return s[:i], s[i:]
 }
 
-// pkgConfigFlagValue is what a mac -F path becomes: the lib directory relative to
-// the .pc file.
-const pkgConfigFlagValue = "${pcfiledir}/../.."
+// treeFromPkgConfig is the tree root, expressed from inside lib/pkgconfig: two
+// levels up from the file.
+const treeFromPkgConfig = "${pcfiledir}/../.."
 
-// replaceBuildPrefix rewrites the Qt build prefix wherever a file records it, which
-// is one path that appears in .prl files.
-func replaceBuildPrefix(text, value string) string {
-	for _, old := range buildPrefixes {
-		text = strings.ReplaceAll(text, old, value)
-	}
-	return text
+// libFromPkgConfig is the tree's lib directory, one level up — which is what the
+// mac -F flag names.
+const libFromPkgConfig = "${pcfiledir}/.."
+
+// qtInstallLibs is the qmake variable that resolves, through qt.conf, to the tree's
+// own lib directory — which is why the sentinel it replaces includes /lib.
+const qtInstallLibs = "$$[QT_INSTALL_LIBS]"
+
+// buildLibDirs are the lib directories Qt was built under, as a .prl records them.
+// Each is replaced by qtInstallLibs, which stands for the same directory wherever
+// the tree lands.
+//
+// Order matters: the macOS path is a substring of the Windows one, so the Windows
+// forms are replaced first. Replacing the macOS path first would leave the drive
+// letter behind as "c:".
+//
+// The spellings are the ones a real .prl carries: lowercase "c:/" — an uppercase
+// "C:/" was searched for and never found — and the Windows form uses backslashes
+// after the drive, so both separators appear.
+var buildLibDirs = []string{
+	`c:\Users\qt\work\install\lib`,
+	"c:/Users/qt/work/install/lib",
+	"/home/qt/work/install/lib",
+	"/Users/qt/work/install/lib",
 }
 
-// buildPrefixes are the directories Qt was built under. They are what a .prl
-// records before relocation; after it, the qmake variable stands in.
-var buildPrefixes = []string{
-	"/home/qt/work/install",
-	"/Users/qt/work/install",
-	"c:/Users/qt/work/install",
-	"C:/Users/qt/work/install",
+// replaceBuildPrefix rewrites the Qt build prefix wherever a file records it, which
+// is the lib directory a .prl names.
+func replaceBuildPrefix(text string) string {
+	for _, old := range buildLibDirs {
+		text = strings.ReplaceAll(text, old, qtInstallLibs)
+	}
+	return text
 }
 
 // writeFile replaces a file's contents, keeping a mode that a Qt build can read.
@@ -263,9 +289,12 @@ func writeFile(path string, body []byte) error {
 	return os.Chmod(path, 0o644)
 }
 
-// failed reports a filesystem failure during relocation.
+// failed reports a filesystem failure during relocation. It is a filesystem
+// outcome (exit 6), not "this target is unsupported": a permission or disk error
+// is not a statement about the version, and conflating the two would send a script
+// down the wrong path.
 func failed(action string, cause error) error {
-	return errs.Wrap(exitcode.Relocate, errs.CodeRelocateUnsupported, errs.PhaseRelocate, cause,
+	return errs.Wrap(exitcode.Filesystem, errs.CodeRelocateFailed, errs.PhaseRelocate, cause,
 		"relocation failed: %s: %v", action, cause)
 }
 

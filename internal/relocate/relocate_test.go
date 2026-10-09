@@ -277,12 +277,12 @@ func TestRelocateRelativisesPkgConfig(t *testing.T) {
 	}
 }
 
-// On macOS a .pc carries a -F flag path too, which has to be relativised the same
-// way.
+// On macOS a .pc carries a -F flag path too, which names the lib directory rather
+// than the tree root.
 func TestRelocateRelativisesMacPkgConfigFlag(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, filepath.Join("lib", "pkgconfig", "Qt6Core.pc"),
-		"prefix=/Users/qt/work/install\nLibs: -F/Users/qt/work/install/lib -lQt6Core\n")
+		"prefix=/Users/qt/work/install\nLibs: -F/Users/qt/work/install/lib -framework QtCore\n")
 
 	if _, err := NewSelector().Relocate(context.Background(), Dir(root),
 		target(model.HostMac, model.KindDesktop, "6.8.0")); err != nil {
@@ -293,10 +293,14 @@ func TestRelocateRelativisesMacPkgConfigFlag(t *testing.T) {
 	if strings.Contains(got, "/Users/qt/work/install") {
 		t.Errorf("pc still holds the build prefix:\n%s", got)
 	}
-	if !strings.Contains(got, "-F${pcfiledir}/../..") {
-		t.Errorf("the -F flag was not relativised:\n%s", got)
+	// -F names lib, so it becomes one level up from the .pc file, not two.
+	if !strings.Contains(got, "-F"+libFromPkgConfig) {
+		t.Errorf("the -F flag is not the lib directory:\n%s", got)
 	}
-	if !strings.Contains(got, "-lQt6Core") {
+	if strings.Contains(got, "-F"+treeFromPkgConfig) {
+		t.Errorf("the -F flag points at the tree root, not lib:\n%s", got)
+	}
+	if !strings.Contains(got, "-framework QtCore") {
 		t.Errorf("the flag rewrite ate the rest of the line:\n%s", got)
 	}
 }
@@ -336,8 +340,55 @@ func TestRelocateRewritesPrl(t *testing.T) {
 	if !strings.Contains(got, "$$[QT_INSTALL_LIBS]") {
 		t.Errorf("prl was not rewritten:\n%s", got)
 	}
-	if strings.Contains(got, "/home/qt/work/install") {
+	if containsAny(got, buildLibDirs) {
 		t.Errorf("prl still holds the build prefix:\n%s", got)
+	}
+	// The qmake variable already stands for <prefix>/lib, so the replacement must
+	// not leave the sentinel's own /lib behind as a doubled path.
+	if strings.Contains(got, "$$[QT_INSTALL_LIBS]/lib") {
+		t.Errorf("prl rewrite doubled the lib directory:\n%s", got)
+	}
+}
+
+// The sentinel is the lib directory, and a real .prl carries a Windows drive path
+// with both separators. Replacing a bare prefix would strand the /lib and truncate
+// the drive letter.
+func TestRelocateRewritesAWindowsPrl(t *testing.T) {
+	root := t.TempDir()
+	// The line D4 records from a real lib/Qt5QmlDebug.prl.
+	const line = `QMAKE_PRL_LIBS = -Lc:/Users/qt/work/install/lib c:/Users/qt/work/install/lib\Qt5Network.lib`
+	write(t, root, filepath.Join("lib", "Qt5QmlDebug.prl"), line+"\n")
+
+	if _, err := NewSelector().Relocate(context.Background(), Dir(root),
+		target(model.HostWindows, model.KindDesktop, "6.8.0")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.TrimSpace(read(t, root, filepath.Join("lib", "Qt5QmlDebug.prl")))
+	want := `QMAKE_PRL_LIBS = -L$$[QT_INSTALL_LIBS] $$[QT_INSTALL_LIBS]\Qt5Network.lib`
+	if got != want {
+		t.Errorf("prl rewrite:\n got %q\nwant %q", got, want)
+	}
+}
+
+// The macOS prefix shares its tail with the Windows one, so a Windows path must not
+// be partially rewritten by the macOS sentinel.
+func TestRelocateDoesNotConfuseMacAndWindowsPrefixes(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, filepath.Join("lib", "Qt5Core.prl"),
+		"LIBS = /Users/qt/work/install/lib c:/Users/qt/work/install/lib\n")
+
+	if _, err := NewSelector().Relocate(context.Background(), Dir(root),
+		target(model.HostMac, model.KindDesktop, "6.8.0")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := read(t, root, filepath.Join("lib", "Qt5Core.prl"))
+	if containsAny(got, buildLibDirs) {
+		t.Errorf("a build prefix survived:\n%s", got)
+	}
+	if strings.Contains(got, "c:$$") {
+		t.Errorf("the Windows drive letter was truncated:\n%s", got)
 	}
 }
 
@@ -401,10 +452,13 @@ func TestRelocateWritesNoAbsolutePath(t *testing.T) {
 		filepath.Join("lib", "libQt6Core.prl"),
 	} {
 		body := read(t, root, rel)
-		for _, forbidden := range []string{root, "/home/qt/work/install"} {
-			if strings.Contains(body, forbidden) {
-				t.Errorf("%s holds %q:\n%s", rel, forbidden, body)
-			}
+		// The staging root itself must not appear; neither must the build prefix it
+		// replaced. The relative forms (.. and ${pcfiledir}) are what should be left.
+		if strings.Contains(body, root) {
+			t.Errorf("%s holds the install path %q:\n%s", rel, root, body)
+		}
+		if containsAny(body, buildLibDirs) {
+			t.Errorf("%s holds a build prefix:\n%s", rel, body)
 		}
 	}
 }
@@ -425,6 +479,16 @@ func TestRelocateStopsOnCancellation(t *testing.T) {
 }
 
 // ---- helpers ----
+
+// containsAny reports whether s holds any of the strings.
+func containsAny(s string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}
 
 // snapshot reads every file under root into one string, for an equality check.
 func snapshot(t *testing.T, root string) string {
