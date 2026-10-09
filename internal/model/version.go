@@ -92,6 +92,14 @@ func (v Version) IsZero() bool { return v.Raw == "" }
 // String returns the string the version was parsed from.
 func (v Version) String() string { return v.Raw }
 
+// Dotted renders the version's numbers the way a release is named — "5.15.2",
+// "6.8.0" — with its suffix. It is a rendering for people to read, not the
+// version's identity: Raw is still the representation it was discovered in, and
+// String still returns that.
+func (v Version) Dotted() string {
+	return fmt.Sprintf("%d.%d.%d%s", v.Major, v.Minor, v.Patch, v.Suffix)
+}
+
 // MarshalJSON renders the version as its raw string, so a document carries the
 // version the repository used rather than a re-rendered object.
 func (v Version) MarshalJSON() ([]byte, error) {

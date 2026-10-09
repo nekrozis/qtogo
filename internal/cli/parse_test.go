@@ -45,7 +45,7 @@ func TestParseArgs(t *testing.T) {
 		{name: "help flag with topic", args: []string{"-h", "version"}, wantMeta: metaHelp, wantHelp: []string{"version"}, wantNode: true},
 		{name: "end of options before a command", args: []string{"--", "version"}, wantMeta: metaVersion, wantNode: true},
 
-		{name: "unknown command", args: []string{"list-qt"}, wantErr: errs.CodeUnknownCommand},
+		{name: "unknown command", args: []string{"no-such-command"}, wantErr: errs.CodeUnknownCommand},
 		{name: "dash as a word", args: []string{"-"}, wantErr: errs.CodeUnknownCommand},
 		{name: "unknown help topic", args: []string{"help", "nope"}, wantErr: errs.CodeUnknownCommand},
 		{name: "unknown option", args: []string{"--nope"}, wantErr: errs.CodeUnknownOption},

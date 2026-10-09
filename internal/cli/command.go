@@ -9,7 +9,11 @@ type commandID uint8
 
 // cmdNone is the id of a node that is not runnable on its own: the root, a
 // namespace, or a meta command.
-const cmdNone commandID = 0
+const (
+	cmdNone commandID = 0
+	// cmdListQt is `qtogo list-qt`.
+	cmdListQt commandID = 1
+)
 
 // metaAction is a request the dispatcher answers itself, before any business
 // command runs.
@@ -34,9 +38,15 @@ type commandNode struct {
 }
 
 // commandTree is the business surface: read it top to bottom and you have the
-// CLI's complete vocabulary. It stays empty until the listing and install
-// commands are implemented; a verb that is not here is absent, not a stub.
-var commandTree = []commandNode{}
+// CLI's complete vocabulary. A verb that is not here is absent, not a stub.
+var commandTree = []commandNode{
+	{
+		name:    "list-qt",
+		summary: "List the Qt versions a repository offers",
+		options: []optionID{optHost, optTarget, optJSON},
+		id:      cmdListQt,
+	},
+}
 
 // metaCommands are answered by the dispatcher. They are reserved words, present
 // in every build including one with an empty business tree.

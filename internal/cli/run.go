@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 
 	"github.com/nekrozis/qtogo/internal/buildinfo"
@@ -11,18 +12,18 @@ import (
 // Run parses one command line and executes it. Payloads go to out and failures
 // come back as an error; nothing here touches os.Args, os.Stdout or os.Exit,
 // which is what makes the front end testable.
-func Run(args []string, out, errOut io.Writer) error {
+func Run(ctx context.Context, args []string, out, errOut io.Writer, svc Services) error {
 	inv, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
-	return dispatch(inv, newRenderer(out, errOut, inv.json))
+	return dispatch(ctx, inv, newRenderer(out, errOut, inv.json), svc)
 }
 
 // Main runs one command line and returns the process exit code. It is the only
 // caller of exitcode.Classify, so the contract has a single implementation.
-func Main(args []string, out, errOut io.Writer) int {
-	if err := Run(args, out, errOut); err != nil {
+func Main(ctx context.Context, args []string, out, errOut io.Writer, svc Services) int {
+	if err := Run(ctx, args, out, errOut, svc); err != nil {
 		writeDiagnostic(errOut, err, wantsJSON(args))
 		return exitcode.Classify(err)
 	}
@@ -30,7 +31,7 @@ func Main(args []string, out, errOut io.Writer) int {
 }
 
 // dispatch executes a parsed invocation.
-func dispatch(inv invocation, r renderer) error {
+func dispatch(ctx context.Context, inv invocation, r renderer, svc Services) error {
 	switch inv.meta {
 	case metaHelp:
 		return r.help(inv.helpPath)
@@ -42,10 +43,13 @@ func dispatch(inv invocation, r renderer) error {
 		return bareInvocation(r)
 	}
 
-	// Business commands are dispatched here as they are implemented. Until one
-	// exists, a resolved command is always a meta command, which was handled
-	// above — so reaching this line would mean a node was added without a
-	// handler, and that must fail rather than return success.
+	if inv.node.id == cmdListQt {
+		return r.listQt(ctx, inv, svc)
+	}
+
+	// Business commands are dispatched here as they are implemented. A node that
+	// reaches this line was added to the tree without a handler, which must fail
+	// rather than return success.
 	return errs.Usagef(errs.CodeUnknownCommand, "%s has no handler in this build", inv.cmd.path())
 }
 
