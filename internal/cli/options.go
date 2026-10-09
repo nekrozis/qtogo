@@ -10,8 +10,7 @@ const (
 	optHelp optionID = iota
 	optVersion
 	optJSON
-	optHost
-	optTarget
+	optModules
 )
 
 // optionSpec is the vocabulary entry for one option.
@@ -32,12 +31,8 @@ var optionTable = []optionSpec{
 	{id: optVersion, long: "version", summary: "Show the version"},
 	{id: optJSON, long: "json", summary: "Write machine-readable JSON instead of text"},
 	{
-		id: optHost, long: "host", summary: "The platform to list for",
-		takesValue: true, value: "host",
-	},
-	{
-		id: optTarget, long: "target", summary: "The platform family to list for",
-		takesValue: true, value: "target",
+		id: optModules, long: "modules", summary: "A module to include (repeatable)",
+		takesValue: true, value: "module",
 	},
 }
 

@@ -47,6 +47,13 @@ func dispatch(ctx context.Context, inv invocation, r renderer, svc Services) err
 		return r.listQt(ctx, inv, svc)
 	}
 
+	// A namespace node groups subcommands and runs nothing itself, so a line
+	// that stops at one is missing its subcommand.
+	if len(inv.node.children) > 0 {
+		return errs.Usagef(errs.CodeMissingArgument, "%s needs a subcommand", topicLabel(inv.path)).
+			WithSuggestion("%s", helpHint())
+	}
+
 	// Business commands are dispatched here as they are implemented. A node that
 	// reaches this line was added to the tree without a handler, which must fail
 	// rather than return success.

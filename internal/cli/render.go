@@ -89,25 +89,18 @@ func (r renderer) listQt(ctx context.Context, inv invocation, svc Services) erro
 	return nil
 }
 
-// listQtRequest reads the host and target list-qt was asked for. The target
-// defaults to desktop, the one this build can address so far.
+// listQtRequest reads the host and target list-qt was asked for. Both are
+// positional and required, so the arity check has already guaranteed they are
+// present.
 func listQtRequest(inv invocation) (model.Host, model.Kind, error) {
-	rawHost, ok := inv.value(optHost)
-	if !ok {
-		return "", "", errs.Usagef(errs.CodeMissingArgument, "list-qt needs --host").
-			WithSuggestion("%s", helpHint())
-	}
-	host, err := model.ParseHost(rawHost)
+	host, err := model.ParseHost(inv.arg("host"))
 	if err != nil {
 		return "", "", errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint())
 	}
 
-	kind := model.KindDesktop
-	if raw, ok := inv.value(optTarget); ok {
-		kind, err = model.ParseKind(raw)
-		if err != nil {
-			return "", "", errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint())
-		}
+	kind, err := model.ParseKind(inv.arg("target"))
+	if err != nil {
+		return "", "", errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint())
 	}
 	return host, kind, nil
 }

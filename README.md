@@ -36,10 +36,10 @@ directly.
 ## Using it
 
 ```sh
-qtogo help                     # the commands this build has
-qtogo version                  # one line
-qtogo version --json           # the same, machine-readable
-qtogo list-qt --host windows   # the Qt versions that target offers
+qtogo help                          # the commands this build has
+qtogo version                       # one line
+qtogo version --json                # the same, machine-readable
+qtogo list-qt windows desktop       # the Qt versions that target offers
 ```
 
 Failures are classified: the exit code says whether the request was wrong, the

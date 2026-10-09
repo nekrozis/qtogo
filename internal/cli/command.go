@@ -25,6 +25,24 @@ const (
 	metaVersion
 )
 
+// argSpec is one positional argument a leaf declares. Identity — the host,
+// target, version and so on a command acts on — is written positionally
+// (ADR-009 decision 7); this is where a command says which ones it takes and in
+// what order. Only trailing arguments may be optional.
+type argSpec struct {
+	name     string
+	summary  string
+	optional bool
+}
+
+// display renders the placeholder for a usage line: "<host>" or "[<arch>]".
+func (a argSpec) display() string {
+	if a.optional {
+		return "[<" + a.name + ">]"
+	}
+	return "<" + a.name + ">"
+}
+
 // commandNode is one node of the command tree. The tree is pure data — which
 // commands exist, how they nest, what each accepts — so adding a command cannot
 // quietly change how a command line parses.
@@ -32,6 +50,7 @@ type commandNode struct {
 	name     string
 	summary  string
 	options  []optionID
+	args     []argSpec
 	children []commandNode
 	id       commandID
 	meta     metaAction
@@ -43,7 +62,11 @@ var commandTree = []commandNode{
 	{
 		name:    "list-qt",
 		summary: "List the Qt versions a repository offers",
-		options: []optionID{optHost, optTarget, optJSON},
+		args: []argSpec{
+			{name: "host", summary: "The platform to list for"},
+			{name: "target", summary: "The platform family to list for"},
+		},
+		options: []optionID{optJSON},
 		id:      cmdListQt,
 	},
 }
@@ -92,6 +115,18 @@ func (n commandNode) accepts(id optionID) bool {
 		return true
 	}
 	return containsOption(n.options, id)
+}
+
+// requiredArgs counts the positional arguments the node requires. Only trailing
+// arguments may be optional, so this is the length of the required prefix.
+func (n commandNode) requiredArgs() int {
+	required := 0
+	for _, a := range n.args {
+		if !a.optional {
+			required++
+		}
+	}
+	return required
 }
 
 // commandPaths maps each runnable leaf to its verb path, so a failure can name

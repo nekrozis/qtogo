@@ -28,6 +28,27 @@ func TestCommandTreeIsWellFormed(t *testing.T) {
 					t.Errorf("%s: declares option id %d, which is not in the option table", where, id)
 				}
 			}
+
+			seenArg := make(map[string]bool, len(n.args))
+			optionalSeen := false
+			for _, a := range n.args {
+				if a.name == "" {
+					t.Errorf("%s: positional argument with an empty name", where)
+				}
+				if a.summary == "" {
+					t.Errorf("%s: argument %q has no summary", where, a.name)
+				}
+				if seenArg[a.name] {
+					t.Errorf("%s: duplicate argument %q", where, a.name)
+				}
+				seenArg[a.name] = true
+				if a.optional {
+					optionalSeen = true
+				} else if optionalSeen {
+					t.Errorf("%s: required argument %q follows an optional one", where, a.name)
+				}
+			}
+
 			walk(where+" ", n.children)
 		}
 	}

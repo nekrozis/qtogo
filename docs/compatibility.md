@@ -11,7 +11,7 @@ not in advance.
 | --- | --- |
 | `qtogo help [topic]`, `-h`, `--help` | implemented; generated from the command tree |
 | `qtogo version`, `--version` | implemented; one line, exit 0 |
-| `qtogo list-qt --host <host> [--target <target>] [--json]` | implemented; the desktop targets of windows, linux and mac |
+| `qtogo list-qt <host> <target> [--json]` | implemented; the desktop targets of windows, linux and mac |
 | anything else, including `install-qt` and the `*-official` verbs | absent: `unknown command "<word>"`, exit 2 |
 
 A verb that is not implemented is absent rather than a stub, so a typo and an
