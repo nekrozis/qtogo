@@ -328,7 +328,7 @@ func runCheck(ctx context.Context, args []string) error {
 	if err := runTest(ctx, nil); err != nil {
 		return err
 	}
-	return runLint(ctx)
+	return runLint(ctx, env)
 }
 
 // checkFormatting fails on any file gofmt would rewrite, and names them.
@@ -345,12 +345,18 @@ func checkFormatting(ctx context.Context) error {
 
 // runLint runs golangci-lint, saying what it is for when it is missing: a bare
 // "executable file not found" tells the reader nothing about what to do about it.
-func runLint(ctx context.Context) error {
+//
+// It runs with the same environment a build does. The linter typechecks the cgo
+// packages, so an inherited CGO_ENABLED=0 excludes them from the build and the run
+// fails with "build constraints exclude all Go files" -- which is exactly the state of
+// a machine that has zig and no system C compiler, the machine this driver is for.
+func runLint(ctx context.Context, env []string) error {
 	path, err := exec.LookPath("golangci-lint")
 	if err != nil {
 		return errors.New("golangci-lint is not installed, and `check` runs it; see https://golangci-lint.run/")
 	}
 	cmd := exec.CommandContext(ctx, path, "run")
+	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return &commandError{code: exitCodeOf(err)}
