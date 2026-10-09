@@ -8,9 +8,9 @@ Every difference is listed in [docs/compatibility.md](docs/compatibility.md).
 
 ## Status
 
-Early. This build implements `version` and `help` and nothing else. A command
-that is not implemented is absent rather than present-and-failing, so
-`qtogo list-qt` reports an unknown command instead of pretending to work.
+Early. This build implements `version`, `help` and `list-qt`. A command that is
+not implemented is absent rather than present-and-failing, so a verb this build
+does not have reports an unknown command instead of pretending to work.
 
 ## Build and test
 
@@ -36,9 +36,10 @@ directly.
 ## Using it
 
 ```sh
-qtogo help                 # the commands this build has
-qtogo version              # one line
-qtogo version --json       # the same, machine-readable
+qtogo help                     # the commands this build has
+qtogo version                  # one line
+qtogo version --json           # the same, machine-readable
+qtogo list-qt --host windows   # the Qt versions that target offers
 ```
 
 Failures are classified: the exit code says whether the request was wrong, the
