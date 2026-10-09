@@ -20,9 +20,13 @@ type Dependency struct {
 
 // Archive is one downloadable file and where its contents belong.
 type Archive struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	SHA256      string `json:"sha256,omitempty"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	// SHA1 is the digest the repository metadata declares, carried so a report can
+	// say what the repository claimed. It is not what integrity is checked against:
+	// that is the transport's own SHA-256, read from the sidecar beside the archive
+	// (ADR-007). The two are deliberately different things.
+	SHA1        string `json:"sha1,omitempty"`
 	Size        int64  `json:"size,omitempty"`
 	InstallPath string `json:"installPath,omitempty"`
 }
