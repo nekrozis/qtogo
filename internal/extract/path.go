@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/nekrozis/qtogo/internal/safename"
 )
 
 // target turns an archive name into the path it must be written to inside root.
@@ -96,49 +98,28 @@ func splitName(name string) []string {
 // badSegment says what is wrong with one segment of a path, or returns "" when the
 // segment is an ordinary name. A name and a symlink target answer to the same rule.
 //
-// The Windows rules apply on every platform. A name Windows would reinterpret is
-// suspect whatever the host is, and a rule that changed with the host would be one
-// more thing to get wrong -- the same archive is extracted on all three.
+// The decision itself is internal/safename's, shared with the downloader, which
+// asks the same question about the one file name it writes. Only the wording is
+// local: a reader here is looking at an archive entry, not a download.
 func badSegment(segment string) string {
-	switch segment {
-	case "":
+	switch safename.Check(segment) {
+	case safename.OK:
+		return ""
+	case safename.Empty:
 		return "an empty segment"
-	case ".", "..":
+	case safename.DotSegment:
 		return fmt.Sprintf("a %q segment", segment)
-	}
-	for _, r := range segment {
-		if r < ' ' {
-			return fmt.Sprintf("%q, which holds a control character", segment)
-		}
-	}
-	if strings.ContainsAny(segment, `<>:"|?*`) {
+	case safename.Separator:
+		return fmt.Sprintf("%q, which holds a path separator", segment)
+	case safename.Control:
+		return fmt.Sprintf("%q, which holds a control character", segment)
+	case safename.IllegalChar:
 		return fmt.Sprintf("%q, which holds a character no filename may", segment)
-	}
-	if strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
+	case safename.TrailingDotOrSpace:
 		return fmt.Sprintf("%q, which ends in a dot or a space", segment)
-	}
-	if reservedName(segment) {
+	case safename.DeviceName:
 		return fmt.Sprintf("%q, which Windows reads as a device", segment)
+	default:
+		return fmt.Sprintf("%q is not an ordinary name", segment)
 	}
-	return ""
-}
-
-// reservedName reports whether Windows would take the segment for a device rather
-// than a file, which would send the bytes somewhere other than the destination.
-func reservedName(segment string) bool {
-	stem := segment
-	if i := strings.IndexByte(segment, '.'); i >= 0 {
-		stem = segment[:i]
-	}
-	switch strings.ToUpper(stem) {
-	case "CON", "PRN", "AUX", "NUL":
-		return true
-	}
-	if len(stem) == 4 {
-		head, tail := strings.ToUpper(stem[:3]), stem[3]
-		if (head == "COM" || head == "LPT") && tail >= '1' && tail <= '9' {
-			return true
-		}
-	}
-	return false
 }
