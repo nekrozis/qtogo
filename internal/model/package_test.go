@@ -41,13 +41,13 @@ func TestArchiveJSONContract(t *testing.T) {
 	archive := Archive{
 		Name:        "qtbase-Windows.7z",
 		URL:         "https://example.invalid/qtbase-Windows.7z",
-		SHA256:      "abc123",
+		SHA1:        "abc123",
 		Size:        42,
 		InstallPath: "5.15.2/gcc_64",
 	}
 
 	const want = `{"name":"qtbase-Windows.7z","url":"https://example.invalid/qtbase-Windows.7z",` +
-		`"sha256":"abc123","size":42,"installPath":"5.15.2/gcc_64"}`
+		`"sha1":"abc123","size":42,"installPath":"5.15.2/gcc_64"}`
 
 	assertJSON(t, archive, want)
 }
