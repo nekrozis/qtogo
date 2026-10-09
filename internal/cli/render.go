@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/nekrozis/qtogo/internal/buildinfo"
+	"github.com/nekrozis/qtogo/internal/catalog"
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/model"
 )
@@ -103,6 +105,85 @@ func listQtRequest(inv invocation) (model.Host, model.Kind, error) {
 		return "", "", errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint())
 	}
 	return host, kind, nil
+}
+
+// planPayload is the JSON shape of a successful plan install-qt.
+type planPayload struct {
+	Host     string            `json:"host"`
+	Target   string            `json:"target"`
+	Version  string            `json:"version"`
+	Arch     string            `json:"arch"`
+	Packages []string          `json:"packages"`
+	Archives []catalog.Archive `json:"archives"`
+}
+
+// planInstallQt renders what an installation would fetch, one archive per line in
+// text and as a document in JSON.
+func (r renderer) planInstallQt(ctx context.Context, inv invocation, svc Services) error {
+	host, kind, version, arch, modules, err := planRequest(inv)
+	if err != nil {
+		return err
+	}
+	plan, err := svc.PlanInstallQt(ctx, host, kind, version, arch, modules)
+	if err != nil {
+		return err
+	}
+
+	if r.json {
+		return writeJSON(r.out, planPayload{
+			Host:     string(host),
+			Target:   string(kind),
+			Version:  plan.Version,
+			Arch:     plan.Arch,
+			Packages: plan.Packages,
+			Archives: plan.Archives,
+		})
+	}
+	for _, a := range plan.Archives {
+		if _, err := fmt.Fprintf(r.out, "%s\t%s\n", a.URL, a.InstallPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// planRequest reads the host, target, version, architecture and modules a plan
+// was asked for. The architecture is optional — the catalog resolves it when the
+// metadata offers exactly one — and the modules are the reference tool's
+// repeatable --modules, each value also read as a comma-separated list.
+func planRequest(inv invocation) (model.Host, model.Kind, model.Version, string, []string, error) {
+	fail := func(err error) (model.Host, model.Kind, model.Version, string, []string, error) {
+		return "", "", model.Version{}, "", nil, err
+	}
+
+	host, err := model.ParseHost(inv.arg("host"))
+	if err != nil {
+		return fail(errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint()))
+	}
+	kind, err := model.ParseKind(inv.arg("target"))
+	if err != nil {
+		return fail(errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint()))
+	}
+	version, err := model.ParseVersion(inv.arg("version"))
+	if err != nil {
+		return fail(errs.Usagef(errs.CodeUnexpectedValue, "%v", err).WithSuggestion("%s", helpHint()))
+	}
+
+	return host, kind, version, inv.arg("arch"), modules(inv), nil
+}
+
+// modules collects --modules values in order, splitting each on commas so the
+// reference tool's "a,b" and this build's "--modules a --modules b" read the same.
+func modules(inv invocation) []string {
+	var out []string
+	for _, value := range inv.values[optModules] {
+		for _, m := range strings.Split(value, ",") {
+			if m = strings.TrimSpace(m); m != "" {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
 }
 
 // writeJSON writes a document that automation reads.

@@ -12,7 +12,10 @@ import (
 	"path"
 	"slices"
 
+	"github.com/nekrozis/qtogo/internal/catalog"
 	"github.com/nekrozis/qtogo/internal/discovery"
+	"github.com/nekrozis/qtogo/internal/errs"
+	"github.com/nekrozis/qtogo/internal/exitcode"
 	"github.com/nekrozis/qtogo/internal/model"
 )
 
@@ -49,4 +52,87 @@ func (s *Service) ListQtVersions(ctx context.Context, host model.Host, kind mode
 func order(versions []model.Version) []model.Version {
 	slices.SortFunc(versions, model.Version.Compare)
 	return slices.CompactFunc(versions, func(a, b model.Version) bool { return a.Compare(b) == 0 })
+}
+
+// PlanInstallQt builds the installation plan for a version, an architecture and a
+// set of modules.
+//
+// It walks the repository the way listing does — the segment, the version
+// directories, the leaf — and then hands the leaf's metadata to the catalog. A
+// version is matched by its numbers, so a request names a release and not the
+// directory token it happens to be spelled with. When a version has several
+// leaves (an architecture-split layout) and no architecture was given, the plan
+// fails rather than pick one: the choice is the caller's to make.
+func (s *Service) PlanInstallQt(ctx context.Context, host model.Host, kind model.Kind,
+	version model.Version, arch string, modules []string) (catalog.Plan, error) {
+
+	segment, err := discovery.Segment(host, kind)
+	if err != nil {
+		return catalog.Plan{}, err
+	}
+	target := path.Join(discovery.Root, segment, string(kind))
+
+	found, err := s.discover.Versions(ctx, target)
+	if err != nil {
+		return catalog.Plan{}, err
+	}
+	directory, err := matchVersion(found, version)
+	if err != nil {
+		return catalog.Plan{}, err
+	}
+
+	leaves, err := s.discover.Leaves(ctx, directory.Path)
+	if err != nil {
+		return catalog.Plan{}, err
+	}
+	if arch == "" && len(leaves) > 1 {
+		return catalog.Plan{}, errs.New(exitcode.NotFound, errs.CodePackageNotFound, errs.PhaseResolve,
+			"%s has more than one architecture; name one with <arch>", directory.Directory.Version.Dotted())
+	}
+
+	// A version directory can carry several leaves, so the plan is the first leaf
+	// whose metadata answers the request; a leaf without the arch is skipped.
+	var firstErr error
+	for _, leaf := range leaves {
+		packages, _, err := s.discover.Metadata(ctx, leaf)
+		if err != nil {
+			return catalog.Plan{}, err
+		}
+		plan, err := catalog.Build(packages, leaf.Path, catalog.Request{
+			Version: directory.Directory.Version,
+			Arch:    arch,
+			Modules: modules,
+		})
+		if err == nil {
+			return plan, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return catalog.Plan{}, firstErr
+}
+
+// matchVersion finds the version directory a request names, comparing the numbers
+// so "6.8.0" matches the directory spelled "qt6_680". A request with a suffix
+// prefers a directory with the same suffix, then the release.
+func matchVersion(found []discovery.Version, want model.Version) (discovery.Version, error) {
+	var release *discovery.Version
+	for i := range found {
+		v := found[i].Directory.Version
+		if v.Major != want.Major || v.Minor != want.Minor || v.Patch != want.Patch {
+			continue
+		}
+		if v.Suffix == want.Suffix {
+			return found[i], nil
+		}
+		if release == nil {
+			release = &found[i]
+		}
+	}
+	if release != nil {
+		return *release, nil
+	}
+	return discovery.Version{}, errs.New(exitcode.NotFound, errs.CodeVersionNotFound, errs.PhaseResolve,
+		"the repository does not offer %s", want.Dotted())
 }

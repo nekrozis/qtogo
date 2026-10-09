@@ -9,6 +9,47 @@ import (
 	"github.com/nekrozis/qtogo/internal/exitcode"
 )
 
+// FuzzParseArgs pins the parser's two promises: it never panics on any words, and
+// when it succeeds the positional count matches what the resolved node declares.
+// Every failure it does produce is an *errs.Error, so the exit code is always
+// classifiable. Args are NUL-separated inside the fuzz input.
+func FuzzParseArgs(f *testing.F) {
+	seeds := []string{
+		"list-qt\x00windows\x00desktop",
+		"list-qt\x00windows",
+		"list-qt\x00windows\x00desktop\x00extra",
+		"list-qt\x00--json\x00--\x00windows\x00desktop",
+		"plan\x00install-qt\x00windows\x00desktop\x006.8.0\x00win64_msvc2022_64",
+		"plan\x00install-qt\x00windows\x00desktop\x006.8.0\x00--modules\x00qtcharts",
+		"plan",
+		"--\x00--json",
+		"--modules\x00--json",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		var args []string
+		if raw != "" {
+			args = strings.Split(raw, "\x00")
+		}
+
+		inv, err := parseArgs(args)
+		if err != nil {
+			var e *errs.Error
+			if !errors.As(err, &e) {
+				t.Fatalf("parseArgs(%q) = %v, want an *errs.Error", args, err)
+			}
+			return
+		}
+		if inv.node != nil && len(inv.args) > len(inv.node.args) {
+			t.Fatalf("parseArgs(%q) accepted %d positional arguments for a node declaring %d",
+				args, len(inv.args), len(inv.node.args))
+		}
+	})
+}
+
 // errorCode reports the machine code of a failure, and fails the test when err
 // did not come from the error taxonomy.
 func errorCode(t *testing.T, err error) string {
