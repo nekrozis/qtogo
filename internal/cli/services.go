@@ -5,6 +5,7 @@ import (
 
 	"github.com/nekrozis/qtogo/internal/catalog"
 	"github.com/nekrozis/qtogo/internal/model"
+	"github.com/nekrozis/qtogo/internal/service"
 )
 
 // Services is what the commands need from the layers beneath the front end: a
@@ -19,4 +20,10 @@ type Services interface {
 	// and a set of modules.
 	PlanInstallQt(ctx context.Context, host model.Host, kind model.Kind,
 		version model.Version, arch string, modules []string) (catalog.Plan, error)
+
+	// InstallQt builds the same plan and, unless the options ask for a dry run,
+	// carries it out.
+	InstallQt(ctx context.Context, host model.Host, kind model.Kind,
+		version model.Version, arch string, modules []string,
+		opts service.InstallOptions) (service.Installed, error)
 }

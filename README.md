@@ -8,9 +8,10 @@ Every difference is listed in [docs/compatibility.md](docs/compatibility.md).
 
 ## Status
 
-Early. This build implements `version`, `help`, `list-qt` and `plan install-qt`. A
-command that is not implemented is absent rather than present-and-failing, so a verb
-this build does not have reports an unknown command instead of pretending to work.
+Early. This build implements `version`, `help`, `list-qt`, `plan install-qt` and
+`install-qt`. A command that is not implemented is absent rather than
+present-and-failing, so a verb this build does not have reports an unknown command
+instead of pretending to work.
 
 ## Build and test
 
@@ -41,6 +42,7 @@ qtogo version                          # one line
 qtogo version --json                   # the same, machine-readable
 qtogo list-qt windows desktop          # the Qt versions that target offers
 qtogo plan install-qt windows desktop 6.8.0 win64_msvc2022_64   # what an install would fetch
+qtogo install-qt windows desktop 6.8.0 win64_msvc2022_64 -O C:\Qt   # install it
 ```
 
 Failures are classified: the exit code says whether the request was wrong, the

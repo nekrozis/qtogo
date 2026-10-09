@@ -15,6 +15,8 @@ const (
 	cmdListQt commandID = 1
 	// cmdPlanInstallQt is `qtogo plan install-qt`.
 	cmdPlanInstallQt commandID = 2
+	// cmdInstallQt is `qtogo install-qt`.
+	cmdInstallQt commandID = 3
 )
 
 // metaAction is a request the dispatcher answers itself, before any business
@@ -88,6 +90,18 @@ var commandTree = []commandNode{
 				id:      cmdPlanInstallQt,
 			},
 		},
+	},
+	{
+		name:    "install-qt",
+		summary: "Install a Qt version",
+		args: []argSpec{
+			{name: "host", summary: "The platform to install for"},
+			{name: "target", summary: "The platform family to install for"},
+			{name: "version", summary: "The Qt version, e.g. 6.8.0"},
+			{name: "arch", summary: "The architecture, e.g. win64_msvc2022_64", optional: true},
+		},
+		options: []optionID{optModules, optOutputDir, optOverwrite, optDryRun, optJSON},
+		id:      cmdInstallQt,
 	},
 }
 

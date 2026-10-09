@@ -17,16 +17,39 @@ import (
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/exitcode"
 	"github.com/nekrozis/qtogo/internal/model"
+	"github.com/nekrozis/qtogo/internal/relocate"
 )
 
 // Service drives the repository layers for the commands.
 type Service struct {
 	discover *discovery.Discover
+	// fetch downloads archives for an install. A listing-only Service never uses
+	// it, which is why it may be nil.
+	fetch downloader
+	// relocator selects the policy that corrects an extracted tree.
+	relocator *relocate.Selector
+	// memoryBudget bounds the decoder during extraction; zero means the default.
+	memoryBudget uint64
 }
 
-// New returns a Service that reads a repository through fetch.
+// New returns a Service that reads a repository through fetch, and relocates an
+// installed tree with the built-in policies.
 func New(fetch discovery.Fetcher) *Service {
-	return &Service{discover: discovery.New(fetch)}
+	return &Service{discover: discovery.New(fetch), relocator: relocate.NewSelector()}
+}
+
+// WithDownloader returns a Service that can also install: it downloads archives
+// through d. Without it, InstallQt fails rather than panicking.
+func (s *Service) WithDownloader(d downloader) *Service {
+	s.fetch = d
+	return s
+}
+
+// WithMemoryBudget bounds the decoder during extraction, for a caller that wants a
+// different ceiling than DefaultMemoryBudget.
+func (s *Service) WithMemoryBudget(bytes uint64) *Service {
+	s.memoryBudget = bytes
+	return s
 }
 
 // ListQtVersions returns the Qt versions a host and target offer, oldest first and

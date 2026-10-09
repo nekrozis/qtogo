@@ -11,6 +11,7 @@ import (
 	"github.com/nekrozis/qtogo/internal/catalog"
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/model"
+	"github.com/nekrozis/qtogo/internal/service"
 )
 
 // renderer keeps the two output contracts apart: stdout carries payloads,
@@ -128,7 +129,67 @@ func (r renderer) planInstallQt(ctx context.Context, inv invocation, svc Service
 	if err != nil {
 		return err
 	}
+	return r.writePlan(host, kind, plan)
+}
 
+// installPayload is the JSON shape of a successful install-qt.
+type installPayload struct {
+	Host        string        `json:"host"`
+	Target      string        `json:"target"`
+	Path        string        `json:"path,omitempty"`
+	Policy      string        `json:"policy,omitempty"`
+	Relocatable bool          `json:"relocatable"`
+	Replaced    bool          `json:"replaced,omitempty"`
+	Plan        *catalog.Plan `json:"plan,omitempty"`
+}
+
+// installQt installs, or with --dry-run shows exactly what plan install-qt shows:
+// the same planner, the same rendering, by construction.
+func (r renderer) installQt(ctx context.Context, inv invocation, svc Services) error {
+	host, kind, version, arch, modules, err := planRequest(inv)
+	if err != nil {
+		return err
+	}
+
+	opts := service.InstallOptions{
+		OutputDir: optionValue(inv, optOutputDir),
+		Overwrite: hasOption(inv.used, optOverwrite),
+		DryRun:    hasOption(inv.used, optDryRun),
+	}
+	// A dry run is the plan command, not a plan of a different kind: it renders
+	// through the same function so the two outputs cannot drift.
+	if opts.DryRun {
+		plan, err := svc.PlanInstallQt(ctx, host, kind, version, arch, modules)
+		if err != nil {
+			return err
+		}
+		return r.writePlan(host, kind, plan)
+	}
+
+	installed, err := svc.InstallQt(ctx, host, kind, version, arch, modules, opts)
+	if err != nil {
+		return err
+	}
+	if r.json {
+		return writeJSON(r.out, installPayload{
+			Host:        string(host),
+			Target:      string(kind),
+			Path:        installed.Path,
+			Policy:      installed.Policy,
+			Relocatable: installed.Relocatable,
+			Replaced:    installed.Replaced,
+			Plan:        &installed.Plan,
+		})
+	}
+	_, err = fmt.Fprintf(r.out, "installed %s %s %s to %s\n",
+		installed.Plan.Version, installed.Plan.Arch, installed.Policy, installed.Path)
+	return err
+}
+
+// writePlan renders a plan: the document in JSON, one archive per line in text.
+// Both the plan command and install-qt's dry run go through here, which is what
+// makes them the same output rather than merely similar.
+func (r renderer) writePlan(host model.Host, kind model.Kind, plan catalog.Plan) error {
 	if r.json {
 		return writeJSON(r.out, planPayload{
 			Host:     string(host),

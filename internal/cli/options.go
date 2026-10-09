@@ -11,6 +11,9 @@ const (
 	optVersion
 	optJSON
 	optModules
+	optOutputDir
+	optOverwrite
+	optDryRun
 )
 
 // optionSpec is the vocabulary entry for one option.
@@ -33,6 +36,18 @@ var optionTable = []optionSpec{
 	{
 		id: optModules, long: "modules", aliases: []string{"m"},
 		summary: "A module to include (repeatable)", takesValue: true, value: "module",
+	},
+	{
+		id: optOutputDir, long: "outputdir", aliases: []string{"O"},
+		summary: "The directory to install into", takesValue: true, value: "dir",
+	},
+	{
+		id: optOverwrite, long: "overwrite",
+		summary: "Replace an existing installation at the destination",
+	},
+	{
+		id: optDryRun, long: "dry-run",
+		summary: "Show what would be installed, without installing it",
 	},
 }
 
