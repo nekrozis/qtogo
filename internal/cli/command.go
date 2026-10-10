@@ -100,7 +100,7 @@ var commandTree = []commandNode{
 			{name: "version", summary: "The Qt version, e.g. 6.8.0"},
 			{name: "arch", summary: "The architecture, e.g. win64_msvc2022_64", optional: true},
 		},
-		options: []optionID{optModules, optOutputDir, optOverwrite, optDryRun, optJSON},
+		options: []optionID{optModules, optOutputDir, optOverwrite, optDryRun, optMemoryBudget, optJSON},
 		id:      cmdInstallQt,
 	},
 }

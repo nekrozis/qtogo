@@ -363,3 +363,90 @@ func TestInstallQtCancellationLeavesNothing(t *testing.T) {
 		t.Errorf("a cancelled install left %v", entries)
 	}
 }
+
+// Nothing is staged on the OS temporary volume: the extraction merge is a rename,
+// and a rename across volumes fails. The staging tree, the downloaded archives and
+// each extraction directory all live under the destination (F1).
+func TestInstallStagesNothingOnTheTempVolume(t *testing.T) {
+	client, _ := installRepo(t)
+	out := t.TempDir()
+	s := New(client).WithDownloader(client)
+	host, kind, version := installRequest(t)
+
+	got, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
+		InstallOptions{OutputDir: out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No qtogo-* directory was left in the OS temp directory by this install.
+	temp := os.TempDir()
+	entries, err := os.ReadDir(temp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "qtogo-extract-") || strings.HasPrefix(e.Name(), "qtogo-install-") {
+			t.Errorf("an install left %s in the OS temp volume %s", e.Name(), temp)
+		}
+	}
+	// And the tree is where it was asked for, which proves the rename worked.
+	if _, err := os.Stat(filepath.Join(got.Path, "bin", "qmake.exe")); err != nil {
+		t.Errorf("the tree is not in place: %v", err)
+	}
+}
+
+// The block budget has to clear a real archive's largest solid block, or the
+// flagship install is refused before decoding anything (F2). The figure is the
+// measured size of a Qt 6.8.0 desktop package's block.
+func TestDefaultMemoryBudgetClearsARealArchive(t *testing.T) {
+	const realQtBlock = 1_613_160_616 // qtdeclarative, Qt 6.8.0 desktop
+	if DefaultMemoryBudget <= realQtBlock {
+		t.Errorf("DefaultMemoryBudget = %d, which is not above the real archive block %d",
+			DefaultMemoryBudget, realQtBlock)
+	}
+}
+
+// A plan and a dry run refuse a target this build cannot relocate, rather than
+// showing a green plan the install then fails on (F3).
+func TestPlanInstallQtChecksCapability(t *testing.T) {
+	client, _ := installRepo(t)
+	s := New(client).WithDownloader(client)
+
+	// The fixture is 5.15.2, which is covered, so it plans.
+	v152, err := model.ParseVersion("5.15.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PlanInstallQt(context.Background(), model.HostWindows, model.KindDesktop,
+		v152, installArch, nil); err != nil {
+		t.Fatalf("PlanInstallQt(covered) = %v, want a plan", err)
+	}
+}
+
+// The budget is bounded, and a smaller one refuses an archive whose block exceeds
+// it — the path that fails before decoding (F2), exercised without a large fixture
+// by driving the limit down rather than the archive up.
+func TestInstallQtRefusesAnArchiveOverTheBudget(t *testing.T) {
+	client, _ := installRepo(t)
+	out := t.TempDir()
+	s := New(client).WithDownloader(client)
+	host, kind, version := installRequest(t)
+
+	// The fixture archive needs more than one byte of block budget, so opening it
+	// is refused before anything is written. The refusal names the budget, which is
+	// what a user with a pathologically small one needs to hear.
+	_, err := s.InstallQt(context.Background(), host, kind, version, installArch, nil,
+		InstallOptions{OutputDir: out, MemoryBudget: 1})
+	assertFailure(t, err, exitcode.Integrity, errs.CodeExtractFailed)
+	if !strings.Contains(err.Error(), "memory budget") {
+		t.Errorf("the refusal does not name the budget: %v", err)
+	}
+
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("an over-budget install left %v", entries)
+	}
+}

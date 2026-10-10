@@ -13,7 +13,7 @@ not in advance.
 | `qtogo version`, `--version` | implemented; one line, exit 0 |
 | `qtogo list-qt <host> <target> [--json]` | implemented; the desktop targets of windows, linux and mac |
 | `qtogo plan install-qt <host> <target> <version> [<arch>] [-m <module>]... [--json]` | implemented; plans what an installation would fetch, without fetching it |
-| `qtogo install-qt <host> <target> <version> [<arch>] [-m <module>]... [-O <dir>] [--overwrite] [--dry-run] [--json]` | implemented; installs, or with `--dry-run` shows the plan |
+| `qtogo install-qt <host> <target> <version> [<arch>] [-m <module>]... [-O <dir>] [--overwrite] [--memory-budget <size>] [--dry-run] [--json]` | implemented; installs, or with `--dry-run` shows the plan |
 | anything else, including the `*-official` verbs | absent: `unknown command "<word>"`, exit 2 |
 
 A verb that is not implemented is absent rather than a stub, so a typo and an
@@ -29,6 +29,7 @@ spelling (ADR-009 decision 8). The deliberate differences sit on top:
 | `-m <module>...` / `--modules <module>...` | an option repeated per module, or one value split on commas | one option taking a space-separated list, or a bare `all` for every module |
 | `list-qt <host> <target>` | the target is required | the target is optional; without it, every target is listed |
 | `install-qt` into an existing directory | **refused**; `--overwrite` is needed to replace it | unpacked over the existing directory |
+| `install-qt` solid-block budget | a finite default (4 GiB), raised or lowered with `--memory-budget` | no bound is exposed |
 
 The comma form is a convenience this build adds, and `all` is left out until the
 module listing a target offers lands, because "every module" is a rule it needs. The

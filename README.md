@@ -43,6 +43,7 @@ qtogo version --json                   # the same, machine-readable
 qtogo list-qt windows desktop          # the Qt versions that target offers
 qtogo plan install-qt windows desktop 6.8.0 win64_msvc2022_64   # what an install would fetch
 qtogo install-qt windows desktop 6.8.0 win64_msvc2022_64 -O C:\Qt   # install it
+qtogo install-qt windows desktop 6.8.0 win64_msvc2022_64 -O C:\Qt --dry-run   # show the plan, install nothing
 ```
 
 Failures are classified: the exit code says whether the request was wrong, the

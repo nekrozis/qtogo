@@ -94,7 +94,7 @@ func TestInstallQtPassesTheFlagsThrough(t *testing.T) {
 	svc := &fakeServices{installed: installedFixture()}
 
 	runWith(svc, "install-qt", "windows", "desktop", "6.8.0", "win64_msvc2022_64",
-		"-O", "/dest", "--overwrite", "-m", "qtcharts")
+		"-O", "/dest", "--overwrite", "-m", "qtcharts", "--memory-budget", "6G")
 
 	if !svc.installOpts.Overwrite {
 		t.Error("--overwrite did not reach the service")
@@ -104,6 +104,48 @@ func TestInstallQtPassesTheFlagsThrough(t *testing.T) {
 	}
 	if strings.Join(svc.planModules, ",") != "qtcharts" {
 		t.Errorf("modules = %v, want qtcharts", svc.planModules)
+	}
+	if svc.installOpts.MemoryBudget != 6<<30 {
+		t.Errorf("memory budget = %d, want %d", svc.installOpts.MemoryBudget, uint64(6)<<30)
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want uint64
+	}{
+		{"4G", 4 << 30},
+		{"4g", 4 << 30},
+		{"512M", 512 << 20},
+		{"512MB", 512 << 20},
+		{"2K", 2 << 10},
+		{"1T", 1 << 40},
+		{"1073741824", 1 << 30},
+		{" 3 G ", 3 << 30},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			got, err := parseSize(tt.raw)
+			if err != nil {
+				t.Fatalf("parseSize(%q) = %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Errorf("parseSize(%q) = %d, want %d", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSizeRefusesNonsense(t *testing.T) {
+	for _, raw := range []string{"", "big", "0", "0G", "-1G", "1.5G", "G"} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := parseSize(raw); err == nil {
+				t.Errorf("parseSize(%q) = nil, want a refusal", raw)
+			} else if code := exitcode.Classify(err); code != exitcode.Usage {
+				t.Errorf("parseSize(%q) exits %d, want %d", raw, code, exitcode.Usage)
+			}
+		})
 	}
 }
 

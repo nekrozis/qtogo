@@ -156,6 +156,13 @@ func (r renderer) installQt(ctx context.Context, inv invocation, svc Services) e
 		Overwrite: hasOption(inv.used, optOverwrite),
 		DryRun:    hasOption(inv.used, optDryRun),
 	}
+	if raw := optionValue(inv, optMemoryBudget); raw != "" {
+		budget, err := parseSize(raw)
+		if err != nil {
+			return err
+		}
+		opts.MemoryBudget = budget
+	}
 	// A dry run is the plan command, not a plan of a different kind: it renders
 	// through the same function so the two outputs cannot drift.
 	if opts.DryRun {

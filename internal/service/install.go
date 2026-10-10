@@ -26,7 +26,13 @@ import (
 const (
 	// DefaultMemoryBudget is the most the decoder may hold at once, for one solid
 	// block. Qt's archives are solid, so this is the working-set ceiling.
-	DefaultMemoryBudget = 1 << 30 // 1 GiB
+	//
+	// It has to clear the largest block a real archive carries: a Qt 6.8.0 desktop
+	// package (qtdeclarative) holds one of about 1.5 GiB, so a smaller default
+	// would refuse a flagship install before decoding anything. Four gigabytes
+	// clears the real maximum with room for a larger one, and remains a bound
+	// rather than "no limit". --memory-budget raises or lowers it.
+	DefaultMemoryBudget = 4 << 30 // 4 GiB
 	// DefaultMaxEntries, DefaultMaxBytes and DefaultMaxEntry bound one archive.
 	DefaultMaxEntries = 1_000_000
 	DefaultMaxBytes   = 32 << 30 // 32 GiB
@@ -106,15 +112,19 @@ func (s *Service) InstallQt(ctx context.Context, host model.Host, kind model.Kin
 	// survives as a directory that looks finished.
 	defer func() { _ = stage.Discard() }()
 
-	work, err := os.MkdirTemp("", "qtogo-install-")
-	if err != nil {
-		return Installed{}, fsFailed("creating a working directory", err)
+	// Downloads and per-archive extraction both happen under the staging tree, on
+	// the destination's own volume: the extraction merge is a rename, and a rename
+	// across volumes fails. They are discarded with the staging tree, so an
+	// install that fails leaves nothing behind — and the archives are not kept,
+	// which is the reference tool's behaviour without --keep.
+	work, scratch := stage.Path("archives"), stage.Path("scratch")
+	for _, dir := range []string{work, scratch} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return Installed{}, fsFailed("creating "+dir, err)
+		}
 	}
-	// The archives are not kept: without --keep there is no visible archive
-	// directory, and the working copies go as soon as they are extracted.
-	defer func() { _ = os.RemoveAll(work) }()
 
-	records, err := s.fetchAndExtract(ctx, plan, work, stage.Dir())
+	records, err := s.fetchAndExtract(ctx, plan, work, scratch, stage.Dir(), opts.MemoryBudget)
 	if err != nil {
 		return Installed{}, err
 	}
@@ -166,6 +176,17 @@ func (s *Service) InstallQt(ctx context.Context, host model.Host, kind model.Kin
 	}, nil
 }
 
+// versionFromPlan re-parses the plan's rendered release, so a target built from a
+// plan carries the version a person reads rather than the directory token.
+func versionFromPlan(plan catalog.Plan) (model.Version, error) {
+	release, err := model.ParseVersion(plan.Version)
+	if err != nil {
+		return model.Version{}, errs.Wrap(exitcode.Internal, errs.CodeUnclassified, errs.PhaseResolve, err,
+			"the plan's version %q is not a version", plan.Version)
+	}
+	return release, nil
+}
+
 // planFor walks the repository and builds the plan, returning the relocation
 // target alongside it.
 func (s *Service) planFor(ctx context.Context, host model.Host, kind model.Kind,
@@ -207,9 +228,16 @@ func (s *Service) planFor(ctx context.Context, host model.Host, kind model.Kind,
 			Modules: modules,
 		})
 		if err == nil {
+			// The target carries the release, not the directory token: the token
+			// ("5120") is how the repository spells it, and a message that names
+			// the version has to read the way a person asked for it ("5.12.0").
+			release, err := versionFromPlan(plan)
+			if err != nil {
+				return catalog.Plan{}, model.Target{}, err
+			}
 			return plan, model.Target{
 				Host: host, Kind: kind,
-				Version: directory.Directory.Version,
+				Version: release,
 				Arch:    plan.Arch,
 			}, nil
 		}
@@ -225,8 +253,15 @@ func (s *Service) planFor(ctx context.Context, host model.Host, kind model.Kind,
 
 // fetchAndExtract downloads every archive the plan names and extracts it to where
 // its install path says, under root. It returns one record per archive.
-func (s *Service) fetchAndExtract(ctx context.Context, plan catalog.Plan, work, root string) ([]filesystem.Record, error) {
-	budget := s.memoryBudget
+//
+// work holds the downloaded archives and scratch holds each archive's extraction
+// directory; both live under the staging tree, so no cross-volume move is ever
+// needed — see extractArchive. budget is the request's --memory-budget, or zero
+// for the default.
+func (s *Service) fetchAndExtract(ctx context.Context, plan catalog.Plan, work, scratch, root string, budget uint64) ([]filesystem.Record, error) {
+	if budget == 0 {
+		budget = s.memoryBudget
+	}
 	if budget == 0 {
 		budget = DefaultMemoryBudget
 	}
@@ -246,7 +281,7 @@ func (s *Service) fetchAndExtract(ctx context.Context, plan catalog.Plan, work, 
 		if err != nil {
 			return nil, err
 		}
-		if err := extractArchive(ctx, got.Path, filepath.Join(root, filepath.FromSlash(archive.InstallPath)), limits); err != nil {
+		if err := extractArchive(ctx, got.Path, filepath.Join(root, filepath.FromSlash(archive.InstallPath)), scratch, limits); err != nil {
 			return nil, err
 		}
 		records = append(records, filesystem.Record{
@@ -263,15 +298,20 @@ func (s *Service) fetchAndExtract(ctx context.Context, plan catalog.Plan, work, 
 //
 // The extractor insists on an empty destination — that is what makes a name it
 // refuses unable to reach anything already there (ADR-005). But archives share a
-// destination: a package records one archive per file group, and a Qt 5 package
-// with no Extract operation puts every one of them at the tree root. So each
-// archive is extracted into a directory of its own and its entries are then moved
-// into place, rather than handing the shared destination to the extractor.
-func extractArchive(ctx context.Context, path, dest string, limits extract.Limits) error {
+// destination: a package records one archive per file group, and the archives of a
+// Qt tree nest <version>/<arch>/ and land in the same place. So each archive is
+// extracted into a directory of its own and its entries are then moved into place,
+// rather than handing the shared destination to the extractor.
+//
+// That working directory is created under scratch — which lives on the staging
+// tree's volume — because merging is a rename, and a rename only works within one
+// volume. On the OS temp directory it would fail with EXDEV wherever the two
+// volumes differ, which on Windows is any install onto a second drive.
+func extractArchive(ctx context.Context, path, dest, scratch string, limits extract.Limits) error {
 	if err := os.MkdirAll(dest, 0o750); err != nil {
 		return fsFailed("creating "+dest, err)
 	}
-	staging, err := os.MkdirTemp("", "qtogo-extract-")
+	staging, err := os.MkdirTemp(scratch, "qtogo-extract-")
 	if err != nil {
 		return fsFailed("creating an extraction directory", err)
 	}

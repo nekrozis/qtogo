@@ -107,6 +107,13 @@ func NewStage(dest string) (*Stage, error) {
 // Dir is the staging directory: extraction and relocation happen under it.
 func (s *Stage) Dir() string { return s.dir }
 
+// Path names a file or directory inside the staging tree, on the same volume as
+// the destination. A caller that stages something — an archive, an extraction
+// directory — puts it here, so a rename into place never crosses a volume.
+func (s *Stage) Path(elem ...string) string {
+	return filepath.Join(append([]string{s.dir}, elem...)...)
+}
+
 // Root reads the staging directory's path, so a Stage is a relocate.Tree.
 func (s *Stage) Root() string { return s.dir }
 
