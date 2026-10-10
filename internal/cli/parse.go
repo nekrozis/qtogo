@@ -36,6 +36,10 @@ type invocation struct {
 	// them. arg looks one up by name.
 	args []string
 
+	// used holds every option the line carried, so a command can ask whether a
+	// value-less flag was given.
+	used []usedOption
+
 	// values holds the value of each value-taking option, in the order they were
 	// written. A repeated option keeps every value, so the first is the one an
 	// option that takes one value uses and a list option reads them all.
@@ -52,6 +56,7 @@ func parseArgs(args []string) (invocation, error) {
 		return invocation{}, err
 	}
 	inv.values = collectValues(used)
+	inv.used = used
 	inv.json = hasOption(used, optJSON)
 
 	// Help wins over everything: it is the one thing a user can always ask for.
@@ -127,6 +132,16 @@ func (inv invocation) arg(name string) string {
 		}
 	}
 	return ""
+}
+
+// optionValue returns a single-valued option's value, or "" when it was not given.
+// A repeated option yields its last value, matching how a command line reads.
+func optionValue(inv invocation, id optionID) string {
+	got := inv.values[id]
+	if len(got) == 0 {
+		return ""
+	}
+	return got[len(got)-1]
 }
 
 // checkArity reports a command line with too few or too many positional

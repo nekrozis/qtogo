@@ -49,6 +49,9 @@ func dispatch(ctx context.Context, inv invocation, r renderer, svc Services) err
 	if inv.node.id == cmdPlanInstallQt {
 		return r.planInstallQt(ctx, inv, svc)
 	}
+	if inv.node.id == cmdInstallQt {
+		return r.installQt(ctx, inv, svc)
+	}
 
 	// A namespace node groups subcommands and runs nothing itself, so a line
 	// that stops at one is missing its subcommand.

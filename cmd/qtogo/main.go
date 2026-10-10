@@ -37,5 +37,6 @@ func newService() cli.Services {
 		fmt.Fprintf(os.Stderr, "qtogo: %v\n", err)
 		os.Exit(exitcode.Config)
 	}
-	return service.New(client)
+	// The same client lists and downloads: one connection pool, one policy.
+	return service.New(client).WithDownloader(client)
 }

@@ -1,6 +1,13 @@
 package cli
 
-import "strings"
+import (
+	"math"
+	"strconv"
+	"strings"
+
+	"github.com/nekrozis/qtogo/internal/errs"
+	"github.com/nekrozis/qtogo/internal/exitcode"
+)
 
 // optionID identifies one option. Ids exist so the command tree can state what
 // it accepts as data rather than as name comparisons.
@@ -11,6 +18,10 @@ const (
 	optVersion
 	optJSON
 	optModules
+	optOutputDir
+	optOverwrite
+	optDryRun
+	optMemoryBudget
 )
 
 // optionSpec is the vocabulary entry for one option.
@@ -34,6 +45,61 @@ var optionTable = []optionSpec{
 		id: optModules, long: "modules", aliases: []string{"m"},
 		summary: "A module to include (repeatable)", takesValue: true, value: "module",
 	},
+	{
+		id: optOutputDir, long: "outputdir", aliases: []string{"O"},
+		summary: "The directory to install into", takesValue: true, value: "dir",
+	},
+	{
+		id: optOverwrite, long: "overwrite",
+		summary: "Replace an existing installation at the destination",
+	},
+	{
+		id: optDryRun, long: "dry-run",
+		summary: "Show what would be installed, without installing it",
+	},
+	{
+		id: optMemoryBudget, long: "memory-budget",
+		summary:    "The most memory one archive's block may need while extracting",
+		takesValue: true, value: "size",
+	},
+}
+
+// parseSize reads a byte size with an optional unit suffix: "4G", "512M", "1GiB",
+// or a bare number of bytes. Case does not matter, and the binary meaning is
+// meant (a G is 1 GiB), which is how the limit it feeds is written.
+func parseSize(raw string) (uint64, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return 0, errs.New(exitcode.Usage, errs.CodeUnexpectedValue, errs.PhaseConfig, "a size is required")
+	}
+	// A trailing "B" is decoration: "4GB" and "4G" mean the same.
+	s = strings.TrimSuffix(strings.TrimSuffix(s, "B"), "b")
+
+	mult := uint64(1)
+	switch last := s[len(s)-1]; last {
+	case 'K', 'k':
+		mult, s = 1<<10, s[:len(s)-1]
+	case 'M', 'm':
+		mult, s = 1<<20, s[:len(s)-1]
+	case 'G', 'g':
+		mult, s = 1<<30, s[:len(s)-1]
+	case 'T', 't':
+		mult, s = 1<<40, s[:len(s)-1]
+	}
+
+	n, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return 0, errs.Wrap(exitcode.Usage, errs.CodeUnexpectedValue, errs.PhaseConfig, err,
+			"%q is not a size (try 4G, 512M, or a byte count)", raw)
+	}
+	if n == 0 {
+		return 0, errs.New(exitcode.Usage, errs.CodeUnexpectedValue, errs.PhaseConfig,
+			"%q is not a usable size", raw)
+	}
+	if n > math.MaxUint64/mult {
+		return 0, errs.New(exitcode.Usage, errs.CodeUnexpectedValue, errs.PhaseConfig, "%q is too large", raw)
+	}
+	return n * mult, nil
 }
 
 // commonOptions are accepted by every command: asking for help is always

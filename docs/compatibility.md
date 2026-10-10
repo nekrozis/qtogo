@@ -13,7 +13,8 @@ not in advance.
 | `qtogo version`, `--version` | implemented; one line, exit 0 |
 | `qtogo list-qt <host> <target> [--json]` | implemented; the desktop targets of windows, linux and mac |
 | `qtogo plan install-qt <host> <target> <version> [<arch>] [-m <module>]... [--json]` | implemented; plans what an installation would fetch, without fetching it |
-| anything else, including `install-qt` and the `*-official` verbs | absent: `unknown command "<word>"`, exit 2 |
+| `qtogo install-qt <host> <target> <version> [<arch>] [-m <module>]... [-O <dir>] [--overwrite] [--memory-budget <size>] [--dry-run] [--json]` | implemented; installs, or with `--dry-run` shows the plan |
+| anything else, including the `*-official` verbs | absent: `unknown command "<word>"`, exit 2 |
 
 A verb that is not implemented is absent rather than a stub, so a typo and an
 unbuilt feature look the same on purpose: neither silently does nothing.
@@ -21,17 +22,25 @@ unbuilt feature look the same on purpose: neither silently does nothing.
 ## Options
 
 Where this build takes an option the reference tool also has, it keeps that tool's
-spelling (ADR-009 decision 8). One deliberate difference sits on top:
+spelling (ADR-009 decision 8). The deliberate differences sit on top:
 
 | Option | qtogo | reference tool |
 | --- | --- | --- |
 | `-m <module>...` / `--modules <module>...` | an option repeated per module, or one value split on commas | one option taking a space-separated list, or a bare `all` for every module |
 | `list-qt <host> <target>` | the target is required | the target is optional; without it, every target is listed |
+| `install-qt` into an existing directory | **refused**; `--overwrite` is needed to replace it | unpacked over the existing directory |
+| `install-qt` solid-block budget | a finite default (4 GiB), raised or lowered with `--memory-budget` | no bound is exposed |
 
 The comma form is a convenience this build adds, and `all` is left out until the
 module listing a target offers lands, because "every module" is a rule it needs. The
 target is required here because the shape is shared with `plan install-qt`, which
 needs one; listing every target at once is a mode this build does not have yet.
+
+Refusing an existing destination is the transactional choice: an installation is
+built beside the destination and moved into place in one step, so replacing what is
+there is the destructive outcome and has to be asked for (ADR-011 decision 5). The
+reference tool unpacks over the directory, which leaves a half-written tree if it
+fails part-way.
 
 ## Output
 

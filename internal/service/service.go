@@ -17,16 +17,39 @@ import (
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/exitcode"
 	"github.com/nekrozis/qtogo/internal/model"
+	"github.com/nekrozis/qtogo/internal/relocate"
 )
 
 // Service drives the repository layers for the commands.
 type Service struct {
 	discover *discovery.Discover
+	// fetch downloads archives for an install. A listing-only Service never uses
+	// it, which is why it may be nil.
+	fetch downloader
+	// relocator selects the policy that corrects an extracted tree.
+	relocator *relocate.Selector
+	// memoryBudget bounds the decoder during extraction; zero means the default.
+	memoryBudget uint64
 }
 
-// New returns a Service that reads a repository through fetch.
+// New returns a Service that reads a repository through fetch, and relocates an
+// installed tree with the built-in policies.
 func New(fetch discovery.Fetcher) *Service {
-	return &Service{discover: discovery.New(fetch)}
+	return &Service{discover: discovery.New(fetch), relocator: relocate.NewSelector()}
+}
+
+// WithDownloader returns a Service that can also install: it downloads archives
+// through d. Without it, InstallQt fails rather than panicking.
+func (s *Service) WithDownloader(d downloader) *Service {
+	s.fetch = d
+	return s
+}
+
+// WithMemoryBudget bounds the decoder during extraction, for a caller that wants a
+// different ceiling than DefaultMemoryBudget.
+func (s *Service) WithMemoryBudget(bytes uint64) *Service {
+	s.memoryBudget = bytes
+	return s
 }
 
 // ListQtVersions returns the Qt versions a host and target offer, oldest first and
@@ -57,81 +80,57 @@ func order(versions []model.Version) []model.Version {
 // PlanInstallQt builds the installation plan for a version, an architecture and a
 // set of modules.
 //
-// It walks the repository the way listing does — the segment, the version
-// directories, the leaf — and then hands the leaf's metadata to the catalog. A
-// version is matched by its numbers, so a request names a release and not the
-// directory token it happens to be spelled with. When a version has several
-// leaves (an architecture-split layout) and no architecture was given, the plan
-// fails rather than pick one: the choice is the caller's to make.
+// It is planFor plus the relocation capability check, so a plan and a dry run
+// refuse a target this build cannot relocate rather than showing a green plan the
+// install then fails (ADR-011 decision 2): the check a real install makes before
+// downloading is the same one, made here before the plan is returned.
 func (s *Service) PlanInstallQt(ctx context.Context, host model.Host, kind model.Kind,
 	version model.Version, arch string, modules []string) (catalog.Plan, error) {
 
-	segment, err := discovery.Segment(host, kind)
+	plan, target, err := s.planFor(ctx, host, kind, version, arch, modules)
 	if err != nil {
 		return catalog.Plan{}, err
 	}
-	target := path.Join(discovery.Root, segment, string(kind))
-
-	found, err := s.discover.Versions(ctx, target)
-	if err != nil {
+	if err := s.relocator.Check(target); err != nil {
 		return catalog.Plan{}, err
 	}
-	directory, err := matchVersion(found, version)
-	if err != nil {
-		return catalog.Plan{}, err
-	}
-
-	leaves, err := s.discover.Leaves(ctx, directory.Path)
-	if err != nil {
-		return catalog.Plan{}, err
-	}
-	if arch == "" && len(leaves) > 1 {
-		return catalog.Plan{}, errs.New(exitcode.NotFound, errs.CodePackageNotFound, errs.PhaseResolve,
-			"%s has more than one architecture; name one with <arch>", directory.Directory.Version.Dotted())
-	}
-
-	// A version directory can carry several leaves, so the plan is the first leaf
-	// whose metadata answers the request; a leaf without the arch is skipped.
-	var firstErr error
-	for _, leaf := range leaves {
-		packages, _, err := s.discover.Metadata(ctx, leaf)
-		if err != nil {
-			return catalog.Plan{}, err
-		}
-		plan, err := catalog.Build(packages, leaf.Path, catalog.Request{
-			Version: directory.Directory.Version,
-			Arch:    arch,
-			Modules: modules,
-		})
-		if err == nil {
-			return plan, nil
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
-	}
-	return catalog.Plan{}, firstErr
+	return plan, nil
 }
 
 // matchVersion finds the version directory a request names, comparing the numbers
-// so "6.8.0" matches the directory spelled "qt6_680". A request with a suffix
-// prefers a directory with the same suffix, then the release.
+// so "6.8.0" matches the directory spelled "qt6_680".
+//
+// A version can be spelled by more than one directory: the desktop one carries no
+// extension, while a sibling like "qt5_5152_wasm" or "qt5_5152_src_doc_examples"
+// decodes to the same numbers with an extension set. The plain directory is the
+// desktop one a request without a suffix means, so it wins over those; a request
+// that does carry a suffix matches the directory with that same suffix.
 func matchVersion(found []discovery.Version, want model.Version) (discovery.Version, error) {
-	var release *discovery.Version
+	var plain, suffixed *discovery.Version
 	for i := range found {
 		v := found[i].Directory.Version
 		if v.Major != want.Major || v.Minor != want.Minor || v.Patch != want.Patch {
 			continue
 		}
-		if v.Suffix == want.Suffix {
+		ext := found[i].Directory.Extension
+		switch {
+		case want.Suffix != "" && v.Suffix == want.Suffix && ext == want.Suffix:
 			return found[i], nil
-		}
-		if release == nil {
-			release = &found[i]
+		case ext == "" && v.Suffix == want.Suffix:
+			// The desktop directory for this release, and the request named no
+			// other spelling: this is the answer.
+			plain = &found[i]
+		case ext == "" && plain == nil:
+			plain = &found[i]
+		case ext != "" && suffixed == nil:
+			suffixed = &found[i]
 		}
 	}
-	if release != nil {
-		return *release, nil
+	switch {
+	case plain != nil:
+		return *plain, nil
+	case suffixed != nil:
+		return *suffixed, nil
 	}
 	return discovery.Version{}, errs.New(exitcode.NotFound, errs.CodeVersionNotFound, errs.PhaseResolve,
 		"the repository does not offer %s", want.Dotted())

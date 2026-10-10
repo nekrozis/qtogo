@@ -82,6 +82,13 @@ func New(cfg Config) (*Client, error) {
 	return newClient(cfg, defaultTransport())
 }
 
+// NewWithTransport builds a Client that routes through rt instead of the default
+// transport. It is for a caller that has its own — a test trusting a server's
+// certificate, or an embedding program with a configured pool.
+func NewWithTransport(cfg Config, rt http.RoundTripper) (*Client, error) {
+	return newClient(cfg, rt)
+}
+
 // newClient is New with the transport supplied, so a test can hand in an
 // httptest server's TLS transport.
 func newClient(cfg Config, rt http.RoundTripper) (*Client, error) {

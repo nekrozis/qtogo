@@ -12,22 +12,27 @@ import (
 	"github.com/nekrozis/qtogo/internal/errs"
 	"github.com/nekrozis/qtogo/internal/exitcode"
 	"github.com/nekrozis/qtogo/internal/model"
+	"github.com/nekrozis/qtogo/internal/service"
 )
 
 // fakeServices answers the commands without a repository, and records what it was
 // asked for.
 type fakeServices struct {
-	versions []model.Version
-	plan     catalog.Plan
-	err      error
-	host     model.Host
-	kind     model.Kind
+	versions  []model.Version
+	plan      catalog.Plan
+	installed service.Installed
+	err       error
+	host      model.Host
+	kind      model.Kind
 	// the plan request
 	planVersion model.Version
 	planArch    string
 	planModules []string
+	// the install request
+	installOpts service.InstallOptions
 	called      bool
 	planCalled  bool
+	instCalled  bool
 }
 
 func (f *fakeServices) ListQtVersions(_ context.Context, host model.Host, kind model.Kind) ([]model.Version, error) {
@@ -42,6 +47,17 @@ func (f *fakeServices) PlanInstallQt(_ context.Context, host model.Host, kind mo
 	f.planVersion, f.planArch, f.planModules = version, arch, modules
 	f.planCalled = true
 	return f.plan, f.err
+}
+
+func (f *fakeServices) InstallQt(_ context.Context, host model.Host, kind model.Kind,
+	version model.Version, arch string, modules []string,
+	opts service.InstallOptions) (service.Installed, error) {
+
+	f.host, f.kind = host, kind
+	f.planVersion, f.planArch, f.planModules = version, arch, modules
+	f.installOpts = opts
+	f.instCalled = true
+	return f.installed, f.err
 }
 
 func runWith(svc Services, args ...string) (int, string, string) {
